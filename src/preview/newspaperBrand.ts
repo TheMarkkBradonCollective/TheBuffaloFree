@@ -1,4 +1,4 @@
-/** The Buffalo Free newspaper look. Original orange remains at ?skin=original. Live product copy stays in siteContent.ts. */
+/** The Buffalo Free brand names. Live product copy stays in siteContent.ts. */
 import { COMMUNITY_SLOGAN } from '../siteContent';
 
 export const NEWSPAPER = {
@@ -13,11 +13,10 @@ export const NEWSPAPER = {
   volume: 'Vol. I · No. 1',
   standfirst: 'Buffalo’s Community Exchange',
   price: 'Gratis',
-  previewLabel: 'Design preview',
-  previewNote:
-    'Same app — same pages, features, and flows. The Buffalo Free is the look; this is a visual reskin only. Add ?skin=original to see the previous site.',
-  originalCta: 'View original site',
-  newspaperCta: 'View TheBuffaloFree',
+  previewLabel: '',
+  previewNote: '',
+  originalCta: '',
+  newspaperCta: '',
   footerByline: 'Printed for neighbors, not for profit.',
 } as const;
 

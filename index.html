@@ -36,22 +36,9 @@
           }
           if (meta) meta.setAttribute('content', '#000000');
         }
-        var params = new URLSearchParams(location.search);
-        var hashQ = location.hash.indexOf('?') >= 0
-          ? new URLSearchParams(location.hash.slice(location.hash.indexOf('?') + 1))
-          : null;
-        var skin = params.get('skin') || (hashQ && hashQ.get('skin'));
-        var stored = sessionStorage.getItem('tbf_newspaper_look_v2');
-        var newspaper = stored === '1';
-        if (skin === 'newspaper') newspaper = true;
-        if (skin === 'original') newspaper = false;
-        if (newspaper) {
-          document.documentElement.classList.add('newspaper-preview');
-          document.title = 'TheBuffaloFree — All the news that’s fit to give';
-          if (meta && !native) meta.setAttribute('content', t === 'light' ? '#e6e5e0' : '#0c0c0b');
-        } else {
-          document.title = 'TheBuffaloFree — Give freely. Ask kindly.';
-        }
+        try { sessionStorage.removeItem('tbf_newspaper_look_v2'); } catch (e) {}
+        document.documentElement.classList.remove('newspaper-preview');
+        document.title = 'TheBuffaloFree — Give freely. Ask kindly.';
         if (native && meta) meta.setAttribute('content', '#000000');
       })();
     </script>
