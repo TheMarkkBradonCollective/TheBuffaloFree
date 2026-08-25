@@ -1,12 +1,12 @@
 {
   "versionName": "0.2.0",
-  "versionCode": 53,
-  "betaLabel": "beta v0.2.0.0053",
-  "downloadUrl": "https://www.buffalobuynothing.com/downloads/sac-buy-nothing-beta-v0.2.0.0053.apk",
-  "aabDownloadUrl": "https://www.buffalobuynothing.com/downloads/sac-buy-nothing-beta-v0.2.0.0053.aab",
+  "versionCode": 1,
+  "betaLabel": "beta v0.2.0.0001",
+  "downloadUrl": "https://www.buffalobuynothing.com/downloads/buf-buy-nothing-beta-v0.2.0.0001.apk",
+  "aabDownloadUrl": "https://www.buffalobuynothing.com/downloads/buf-buy-nothing-beta-v0.2.0.0001.aab",
   "releaseTag": "android-v0.2.0",
-  "publishedAt": "2026-08-25T03:07:34.287Z",
-  "fileName": "sac-buy-nothing-beta-v0.2.0.0053.apk",
-  "aabFileName": "sac-buy-nothing-beta-v0.2.0.0053.aab",
-  "legacyAabFileName": "sac-buy-nothing.aab"
+  "publishedAt": null,
+  "fileName": "buf-buy-nothing-beta-v0.2.0.0001.apk",
+  "aabFileName": "buf-buy-nothing-beta-v0.2.0.0001.aab",
+  "legacyAabFileName": "buf-buy-nothing.aab"
 }

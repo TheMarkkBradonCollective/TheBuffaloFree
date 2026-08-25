@@ -1,6 +1,0 @@
-Android beta v0.1.0.0042 (versionCode 42)
-
-What's new:
-• Notification bar icon — 3D hands + dollar bill artwork (matches the app logo)
-
-Download (sideload): https://www.buffalobuynothing.com/download

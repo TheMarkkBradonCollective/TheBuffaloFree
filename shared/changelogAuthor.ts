@@ -1,2 +1,2 @@
-/** Director account — all seeded/historical changelog rows use this uid for votes. */
-export const CHANGELOG_AUTHOR_UID = '204b071f-100c-401d-b76d-40c594e1f132';
+/** Director account uid for seeded changelog rows — set when Buffalo Supabase is configured. */
+export const CHANGELOG_AUTHOR_UID = '';

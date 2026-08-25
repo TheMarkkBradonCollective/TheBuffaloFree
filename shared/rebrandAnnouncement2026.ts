@@ -1,87 +1,28 @@
-/** Aug 2026 rebrand / trademark letter — shared by seed, popup, and home notice. */
+/** Pre-launch Buffalo — no rebrand letter or trademark notice until we publish our own News. */
 
-export const REBRAND_ANNOUNCEMENT_ID = '2026-08-21_rebrand-letter';
+export const REBRAND_ANNOUNCEMENT_ID = 'buffalo-prelaunch-placeholder';
 
-export const REBRAND_ANNOUNCEMENT_DATE = '2026-08-21';
+export const REBRAND_ANNOUNCEMENT_DATE = '';
 
-export const REBRAND_ANNOUNCEMENT_TITLE = 'I do not know what else to do';
+export const REBRAND_ANNOUNCEMENT_TITLE = '';
 
-/** Short teaser in News list and push preview. */
-export const REBRAND_ANNOUNCEMENT_BODY =
-  'Sounds like shutdown. Nope — got a good idea. You gotta wait for version 0.2.0.';
+export const REBRAND_ANNOUNCEMENT_BODY = '';
 
-/** Full letter — popup + News detail. Not a traditional release note. */
-export const REBRAND_ANNOUNCEMENT_LETTER = `Neighbors,
+export const REBRAND_ANNOUNCEMENT_LETTER = '';
 
-I'm going to be honest — I'm kind of defeated on this one.
-
-Our name — "Buy Nothing" — runs into trademarks and brands that aren't ours. I've turned it over every way I can think of, and I don't know what else to do except shut Buffalo Buy Nothing down: take the site off, pull the apps, and say goodbye.
-
-…
-
-NAWH, I'M JUST GIV'N. 😅
-
-Wait — nope. I actually got such a good idea for what comes next. You're gonna have to wait while I cook it, but we're not closing. Your listings, your messages, and this community stay.
-
-Here is what is actually changing:
-
-I'm going to stop active development on big new features for a while. The site and apps you use today keep working — post, gift, chat, pick up, all of it. In the background, I'm building **version 0.2.0** — a full rebrand into something that is fully our own. I think the new name and look are genuinely clever — I've been designing it from mobile to desktop to PWA to APK/AAB — but I'm not spilling those beans yet. I want it cooked right before you see it.
-
-When version 0.2.0 ships, it also moves us out of **internal testing** (the small Play Console internal track — basically me plus a tight tester circle) and into **closed testing** (a wider invited Google Play beta before anything public). Same community, same purpose — an identity that is ours alone, with no trademark gray area.
-
-Thank you for being here while I get this right. You built this. I'm not walking away — just turning the page.
-
-— Mark
-TheBuffaloFree Director, Buffalo`;
-
-/** Professional home-page notice — upcoming link change (rebrand is live). */
 export const TRADEMARK_HOME_NOTICE = {
-  title: 'Notice: upcoming website and app link changes',
-  body: `TheBuffaloFree is the community's published name and visual identity.
-
-We will move to a new website address and a new Android download link in a future update. That transition is not in effect today. Please continue using the current site and installed app until further notice.
-
-Your neighbor account, listings, messages, and notifications will remain the same. Advance notice and step-by-step instructions will be published in News before any change takes effect.
-
-Questions may be directed to Support through Chat.`,
+  title: '',
+  body: '',
 };
 
-/** Short feed post for copy/paste (cliff-hanger). */
-export const REBRAND_FEED_CLIFFHANGER = `I'm kind of defeated on this one honestly 😔
+export const REBRAND_FEED_CLIFFHANGER = '';
 
-Our name hits trademarks we don't own. I've tried everything I can think of — I don't know what else to do but shut Buffalo Buy Nothing down.
+export const REBRAND_ANNOUNCEMENT_PUBLISHED_AT = '';
 
-…
+export const REBRAND_UPDATE_ID = 'buffalo-prelaunch-update-placeholder';
 
-NAWH, I'M JUST GIV'N. 😂
+export const REBRAND_UPDATE_TITLE = '';
 
-Nope. Got such a good idea — you gotta wait. ✅ Version 0.2.0 is cooking. 👀 Full letter in News (bell → News). 🔔`;
+export const REBRAND_UPDATE_BODY = '';
 
-export const REBRAND_ANNOUNCEMENT_PUBLISHED_AT = '2026-08-21T01:10:00.000Z';
-
-/** Updates tab — professional product note (News has the personal letter). */
-export const REBRAND_UPDATE_ID = '2026-08-21_trademark-rebrand-notice';
-
-export const REBRAND_UPDATE_TITLE = 'Worth reading before you worry';
-
-export const REBRAND_UPDATE_BODY =
-  'Site stays up while version 0.2.0 cooks in private — you gotta wait on the reveal.';
-
-export const REBRAND_UPDATE_DETAIL = `WHAT NEIGHBORS SEE
-• buffalobuynothing.com now shows an official trademark notice on the home page — we are independent and working on a distinct name
-• First visit shows a one-time letter from Mark (dismiss it anytime; the full letter also lives in bell → News)
-• The site and apps stay fully available — post, gift, chat, and events work as they do today
-• Large new feature work pauses while version 0.2.0 is built in private (mobile, desktop, PWA, and Android)
-• When version 0.2.0 ships, the Android app moves from internal testing to closed testing — a wider invited Play beta before any public launch
-
-Mark's full personal letter is in Notifications → News.
-
-— Mark
-
-WHERE TO LOOK IN CODE
-- shared/rebrandAnnouncement2026.ts — letter, home notice, feed cliff-hanger
-- src/components/RebrandAnnouncementModal.tsx — one-time popup
-- src/components/public/TrademarkNoticeBanner.tsx — home page notice
-
-HISTORY
-2026-08-21 — Rebrand announcement (PR #328).`;
+export const REBRAND_UPDATE_DETAIL = '';

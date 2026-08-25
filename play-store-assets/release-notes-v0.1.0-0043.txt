@@ -1,9 +1,0 @@
-Android beta v0.1.0.0043 (versionCode 43)
-
-What's new:
-• Friends + feed filters (Everyone / Neighbors / Friends)
-• Profile tabs + chat inbox filters
-• Delete confirmations; profile photo fixes
-• Notification and UI polish
-
-Download (sideload): https://www.buffalobuynothing.com/download

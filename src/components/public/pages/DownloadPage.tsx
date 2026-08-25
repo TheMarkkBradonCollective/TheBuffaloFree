@@ -319,7 +319,7 @@ function DownloadPageContent({ onBack, userProfile }: DownloadPageProps) {
             {apkDownloadHref ? (
               <TrackedDownloadLink
                 href={apkDownloadHref}
-                download={latestApk?.fileName || 'sac-buy-nothing.apk'}
+                download={latestApk?.fileName || 'buf-buy-nothing.apk'}
                 className="inline-flex w-full items-center justify-center gap-2 px-4 py-3 bg-accent hover:bg-accent-hover text-on-accent text-sm font-black uppercase tracking-wide rounded-xl transition-colors"
               >
                 <Download className="w-4 h-4" />
@@ -332,7 +332,7 @@ function DownloadPageContent({ onBack, userProfile }: DownloadPageProps) {
             {aabDownloadHref ? (
               <TrackedDownloadLink
                 href={aabDownloadHref}
-                download={latestApk?.aabFileName || latestApk?.legacyAabFileName || 'sac-buy-nothing.aab'}
+                download={latestApk?.aabFileName || latestApk?.legacyAabFileName || 'buf-buy-nothing.aab'}
                 className="mt-2 inline-flex w-full items-center justify-center gap-2 px-4 py-2.5 border border-app bg-inset hover:bg-surface text-app text-xs font-bold rounded-xl transition-colors"
               >
                 <Download className="w-3.5 h-3.5" />

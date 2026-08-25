@@ -1,7 +1,0 @@
-Android beta v0.1.0.0034 (versionCode 34)
-
-What's new:
-• Map + New — post Stuff or Events with GPS pin
-• DMs compose restored; listings expire after 30 days
-
-Download (sideload): https://www.buffalobuynothing.com/download

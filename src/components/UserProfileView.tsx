@@ -676,7 +676,7 @@ export default function UserProfileView({
               {canDownloadApk && apkDownloadHref ? (
                 <TrackedDownloadLink
                   href={apkDownloadHref}
-                  download={latestApk?.fileName || 'sac-buy-nothing.apk'}
+                  download={latestApk?.fileName || 'buf-buy-nothing.apk'}
                   className="inline-flex w-full sm:w-auto items-center justify-center gap-2 px-4 py-2.5 bg-accent hover:bg-accent-hover text-on-accent rounded-xl text-xs font-bold uppercase tracking-wide transition-colors"
                 >
                   <Download className="w-4 h-4 shrink-0" />

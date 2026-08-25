@@ -1,5 +1,0 @@
-Android beta 0.2.0 (52)
-
-• App is now TheBuffaloFree on your home screen and in Play Store
-• Same community — give freely, ask kindly, neighbors helping neighbors
-• Closed testing opt-in: https://play.google.com/apps/testing/org.buffalobuynothing.app
