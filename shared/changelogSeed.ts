@@ -36,7 +36,7 @@ const TESTER_LIST_NEWS_AT = '2026-08-22T00:40:00.000Z';
 const TESTER_LIST_NEWS_UPDATED_AT = '2026-08-22T00:50:00.000Z';
 const CLOSED_TESTING_NEWS_UPDATED_AT = '2026-08-22T00:50:00.000Z';
 const UPCOMING_URL_NEWS_AT = '2026-08-22T03:50:00.000Z';
-const HOSTING_OUTAGE_UPDATE_AT = '2026-08-24T23:30:00.000Z';
+const HOSTING_OUTAGE_NEWS_AT = '2026-08-24T23:30:00.000Z';
 const PLAY_CLOSED_TESTING_URL = 'https://play.google.com/apps/testing/org.buffalobuynothing.app';
 
 /** Canonical Updates feed — current APK plus later posts. */
@@ -61,31 +61,6 @@ TheBuffaloFree, 0.2.0 (53): Buffalo blue squircle on your phone and on the site.
     postedByUserId: CHANGELOG_AUTHOR_UID,
     createdAt: APK_0053_AT,
     updatedAt: APK_0053_AT,
-  },
-  {
-    id: '2026-08-24_hosting-outage-resolved',
-    date: '2026-08-24',
-    title: 'Site and app access restored',
-    body: 'For a stretch this weekend the website, home-screen app, and Android shell all showed the same “deployment paused” screen. That is fixed now. Sorry for the disruption.',
-    detail: `WHAT NEIGHBORS SAW
-Whether you opened the website, a saved home-screen icon, or the Android app, you may have hit a blank page that said the deployment was temporarily paused. Your account, listings, and messages were safe in the database — the community app just could not load until hosting was back.
-
-WHAT WE DID
-• Found the real cause on the hosting side (not billing, not your phone)
-• Restored the live site and confirmed sign-in, feed, and downloads work again
-• Rolled back mistaken “fixes” that were not the problem
-
-GOING FORWARD
-I am watching deploy health more closely and will post here quickly if anything like this happens again. If you still see the paused screen, force-close the app or clear the browser tab and try again. Still stuck? Chat → Support.
-
-Thank you for your patience.
-
-— Mark`,
-    directorName: DIRECTOR_NAME,
-    directorTitle: DIRECTOR_TITLE,
-    postedByUserId: CHANGELOG_AUTHOR_UID,
-    createdAt: HOSTING_OUTAGE_UPDATE_AT,
-    updatedAt: HOSTING_OUTAGE_UPDATE_AT,
   },
   {
     id: '2026-08-21_apk-0052',
@@ -132,6 +107,31 @@ TheBuffaloFree, 0.2.0 (51): same app, tighter fit.
 
 /** Canonical News feed — community announcements for bell → News. */
 export const SEEDED_HELP_ANNOUNCEMENTS: SeededHelpAnnouncement[] = [
+  {
+    id: '2026-08-24_hosting-outage-resolved',
+    date: '2026-08-24',
+    title: 'Site and app access restored',
+    body: 'For a stretch this weekend the website, home-screen app, and Android shell all showed the same “deployment paused” screen. That is fixed now. Sorry for the disruption.',
+    detail: `WHAT NEIGHBORS SAW
+Whether you opened the website, a saved home-screen icon, or the Android app, you may have hit a blank page that said the deployment was temporarily paused. Your account, listings, and messages were safe in the database — the community app just could not load until hosting was back.
+
+WHAT WE DID
+• Found the real cause on the hosting side (not billing, not your phone)
+• Restored the live site and confirmed sign-in, feed, and downloads work again
+• Rolled back mistaken “fixes” that were not the problem
+
+GOING FORWARD
+I am watching deploy health more closely and will post here quickly if anything like this happens again. If you still see the paused screen, force-close the app or clear the browser tab and try again. Still stuck? Chat → Support.
+
+Thank you for your patience.
+
+— Mark`,
+    authorName: DIRECTOR_NAME,
+    authorTitle: DIRECTOR_TITLE,
+    postedByUserId: CHANGELOG_AUTHOR_UID,
+    createdAt: HOSTING_OUTAGE_NEWS_AT,
+    updatedAt: HOSTING_OUTAGE_NEWS_AT,
+  },
   {
     id: '2026-08-22_upcoming-url-and-app-link',
     date: '2026-08-22',
