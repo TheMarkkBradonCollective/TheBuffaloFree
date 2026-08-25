@@ -1,0 +1,1210 @@
+import { supabase, buildDmChatId, getOrCreateSupabaseChat, createSupabaseMessage, staffGetListingById, getSupabaseProfile } from '../supabase';
+import type { GoGetFulfillerLiveLocation, GoGetHandshakeMode, GoGetLiveLocation, GoGetSession, GoGetSessionStatus, ItemPost, UserProfile } from '../types';
+import { isPlayStoreDemo } from '../preview/playStoreDemo';
+import {
+  getPlayStoreDemoActiveGoGetSession,
+  getPlayStoreDemoFulfillerLiveLocation,
+  getPlayStoreDemoGoGetSession,
+  getPlayStoreDemoLiveLocation,
+} from '../preview/playStoreDemoGoGet';
+import { CLIENT_PUSH_DISPATCH_ENABLED } from './pushConfig';
+import { subscribePostgresChanges } from './supabaseRealtime';
+import { isStaffRole } from './roles';
+import {
+  checkSelfGoGetEligibility,
+  isGoGetCoordinationEnabled,
+} from './goGetEligibility';
+import { getGoGetRingDuration } from './goGetRing';
+import { getPickupAvailability, isProfileWithinPickupAvailability, isTimeInSharedAvailability } from './pickupAvailability';
+
+/** Curb Alert / Porch Pickup — first-come items meant to be grabbed with no handshake. */
+export const INSTANT_CLAIM_CATEGORIES = ['Curb Alert', 'Porch Pickup'];
+
+export function isInstantClaimCategory(category: string): boolean {
+  return INSTANT_CLAIM_CATEGORIES.includes(category);
+}
+
+export function goGetHandshakeModeForItem(item: Pick<ItemPost, 'type' | 'category'>): GoGetHandshakeMode {
+  return item.type === 'giveaway' && isInstantClaimCategory(item.category) ? 'instant' : 'availability';
+}
+
+const TERMINAL_STATUSES: GoGetSessionStatus[] = ['completed', 'cancelled', 'expired', 'disputed'];
+
+export function isTerminalGoGetStatus(status: GoGetSessionStatus): boolean {
+  return TERMINAL_STATUSES.includes(status);
+}
+
+async function runGoGetPushTask(task: () => Promise<unknown>): Promise<void> {
+  if (!CLIENT_PUSH_DISPATCH_ENABLED) return;
+  try {
+    await task();
+  } catch (err) {
+    console.warn('[go-get push]', err);
+  }
+}
+
+function str(value: unknown, fallback = ''): string {
+  return typeof value === 'string' ? value : fallback;
+}
+
+function num(value: unknown): number {
+  return typeof value === 'number' ? value : Number(value ?? 0) || 0;
+}
+
+function nullableStr(value: unknown): string | null {
+  return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
+function nullableNum(value: unknown): number | null {
+  if (value == null) return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function normalizeGoGetSession(row: Record<string, unknown>): GoGetSession {
+  return {
+    id: str(row.id),
+    itemId: str(row.itemId),
+    itemType: str(row.itemType) as GoGetSession['itemType'],
+    fulfillerUserId: str(row.fulfillerUserId),
+    fulfillerName: str(row.fulfillerName, 'Neighbor'),
+    requesterUserId: str(row.requesterUserId),
+    requesterName: str(row.requesterName, 'Neighbor'),
+    chatId: str(row.chatId),
+    handshakeMode: (str(row.handshakeMode, 'availability') as GoGetHandshakeMode) || 'availability',
+    status: (str(row.status, 'awaiting_availability') as GoGetSessionStatus) || 'awaiting_availability',
+    destinationLat: num(row.destinationLat),
+    destinationLng: num(row.destinationLng),
+    destinationLabel: str(row.destinationLabel, 'Pickup location'),
+    availableFrom: nullableStr(row.availableFrom),
+    availableUntil: nullableStr(row.availableUntil),
+    scheduledAt: nullableStr(row.scheduledAt),
+    fulfillerReadyAt: nullableStr(row.fulfillerReadyAt),
+    startedAt: nullableStr(row.startedAt),
+    arrivedAt: nullableStr(row.arrivedAt),
+    completedAt: nullableStr(row.completedAt),
+    cancelledAt: nullableStr(row.cancelledAt),
+    cancelledByUserId: nullableStr(row.cancelledByUserId),
+    cancelReason: nullableStr(row.cancelReason),
+    fulfillerSharingLocation: row.fulfillerSharingLocation === true,
+    ringExpiresAt: nullableStr(row.ringExpiresAt),
+    ringDurationSeconds: nullableNum(row.ringDurationSeconds),
+    createdAt: str(row.createdAt, new Date().toISOString()),
+    updatedAt: str(row.updatedAt, new Date().toISOString()),
+  };
+}
+
+function normalizeGoGetFulfillerLiveLocation(row: Record<string, unknown>): GoGetFulfillerLiveLocation {
+  return {
+    sessionId: str(row.sessionId),
+    lat: num(row.lat),
+    lng: num(row.lng),
+    heading: nullableNum(row.heading),
+    updatedAt: str(row.updatedAt, new Date().toISOString()),
+  };
+}
+
+function normalizeGoGetLiveLocation(row: Record<string, unknown>): GoGetLiveLocation {
+  return {
+    sessionId: str(row.sessionId),
+    lat: num(row.lat),
+    lng: num(row.lng),
+    heading: nullableNum(row.heading),
+    speedMph: nullableNum(row.speedMph),
+    etaSeconds: nullableNum(row.etaSeconds),
+    distanceMeters: nullableNum(row.distanceMeters),
+    updatedAt: str(row.updatedAt, new Date().toISOString()),
+  };
+}
+
+type Result<T = undefined> = { ok: boolean; errorMessage?: string } & (T extends undefined ? {} : Partial<T>);
+
+const MISSING_TABLE_MESSAGE =
+  'Run the Go Get pickup sessions SQL (section 20/21 in complete-schema.sql) in Supabase.';
+
+function isMissingTableError(error: { code?: string } | null | undefined): boolean {
+  return error?.code === '42P01';
+}
+
+/** Any non-terminal session for this item involving this user (either role). */
+export async function getActiveGoGetSession(itemId: string, userId: string): Promise<GoGetSession | null> {
+  if (isPlayStoreDemo()) {
+    return getPlayStoreDemoActiveGoGetSession(itemId, userId);
+  }
+  try {
+    const { data, error } = await supabase
+      .from('go_get_sessions')
+      .select('*')
+      .eq('itemId', itemId)
+      .order('createdAt', { ascending: false });
+    if (error || !data) return null;
+    const rows = data.map((r) => normalizeGoGetSession(r as Record<string, unknown>));
+    return (
+      rows.find(
+        (r) =>
+          (r.fulfillerUserId === userId || r.requesterUserId === userId) && !isTerminalGoGetStatus(r.status),
+      ) ?? null
+    );
+  } catch {
+    return null;
+  }
+}
+
+export async function getGoGetSessionById(sessionId: string): Promise<GoGetSession | null> {
+  if (isPlayStoreDemo()) {
+    return getPlayStoreDemoGoGetSession(sessionId);
+  }
+  try {
+    const { data, error } = await supabase.from('go_get_sessions').select('*').eq('id', sessionId).maybeSingle();
+    if (error || !data) return null;
+    return normalizeGoGetSession(data as Record<string, unknown>);
+  } catch {
+    return null;
+  }
+}
+
+export interface CreateGoGetSessionParams {
+  item: ItemPost;
+  fulfillerUserId: string;
+  fulfillerName: string;
+  requesterUserId: string;
+  requesterName: string;
+  destination: { lat: number; lng: number };
+  destinationLabel: string;
+}
+
+/** Start a "Go Get" — creates (or reuses) the pairing chat and the session row. */
+export async function createGoGetSession(
+  params: CreateGoGetSessionParams,
+): Promise<Result<{ session: GoGetSession }>> {
+  const { item, fulfillerUserId, fulfillerName, requesterUserId, requesterName, destination, destinationLabel } =
+    params;
+
+  if (fulfillerUserId === requesterUserId) {
+    return { ok: false, errorMessage: 'You cannot Go Get your own listing.' };
+  }
+
+  // Device + notification gate for whoever is creating the session (signed-in user).
+  const { data: authData } = await supabase.auth.getSession();
+  const actorUid = authData.session?.user?.id || '';
+  if (actorUid) {
+    const actorProfile = await getSupabaseProfile(actorUid);
+    if (actorProfile) {
+      const selfOk = await checkSelfGoGetEligibility(actorProfile);
+      if (selfOk.ok === false) {
+        if (selfOk.reason === 'need_install') {
+          return {
+            ok: false,
+            errorMessage:
+              'Go Get only works in the Buffalo Buy Nothing Android app (APK or Play Store). On the website, message the neighbor to arrange pickup.',
+          };
+        }
+        if (selfOk.reason === 'need_notifications') {
+          return {
+            ok: false,
+            errorMessage:
+              'Turn on notifications (bell → Notification settings) before using Go Get or pickup coordination.',
+          };
+        }
+        return {
+          ok: false,
+          errorMessage:
+            'You turned off Go Get & pickup coordination in Account settings. You can still message neighbors to arrange pickup.',
+        };
+      }
+    }
+  }
+
+  // Opt-out check for both parties (poster + navigator).
+  const [fulfillerProfile, requesterProfile] = await Promise.all([
+    getSupabaseProfile(fulfillerUserId),
+    getSupabaseProfile(requesterUserId),
+  ]);
+  if (fulfillerProfile && !isGoGetCoordinationEnabled(fulfillerProfile)) {
+    return {
+      ok: false,
+      errorMessage: `${fulfillerName} isn’t using app pickup coordination. Message them to arrange pickup independently.`,
+    };
+  }
+  if (requesterProfile && !isGoGetCoordinationEnabled(requesterProfile)) {
+    return {
+      ok: false,
+      errorMessage: `${requesterName} isn’t using app pickup coordination. Message them to arrange pickup independently.`,
+    };
+  }
+  if (fulfillerProfile && !isProfileWithinPickupAvailability(fulfillerProfile)) {
+    return {
+      ok: false,
+      errorMessage: `${fulfillerName} isn’t available for app pickup coordination right now.`,
+    };
+  }
+  if (requesterProfile && !isProfileWithinPickupAvailability(requesterProfile)) {
+    return {
+      ok: false,
+      errorMessage: 'You’re outside your pickup availability hours. Adjust Account settings or message the poster.',
+    };
+  }
+
+  const existing = await getActiveGoGetSession(item.id, requesterUserId);
+  if (existing) {
+    return { ok: true, session: existing };
+  }
+
+  const chatId = buildDmChatId(fulfillerUserId, requesterUserId);
+  const chatOk = await getOrCreateSupabaseChat(chatId, {
+    id: chatId,
+    participantIds: [fulfillerUserId, requesterUserId].sort(),
+    participantNames: { [fulfillerUserId]: fulfillerName, [requesterUserId]: requesterName },
+    participantPhotos: {},
+    lastMessageAt: new Date().toISOString(),
+    lastMessageText: '',
+    lastMessageSenderId: requesterUserId,
+    itemId: item.id,
+    itemTitle: item.title,
+  });
+  if (!chatOk) {
+    return { ok: false, errorMessage: 'Could not open a chat for this pickup.' };
+  }
+
+  const handshakeMode = goGetHandshakeModeForItem(item);
+  const now = new Date().toISOString();
+  const instant = handshakeMode === 'instant';
+
+  const id = `ggs_${item.id}_${requesterUserId}_${Date.now()}`;
+  const ringDurationSeconds = fulfillerProfile ? getGoGetRingDuration(fulfillerProfile) : 140;
+  const ringExpiresAt = instant
+    ? null
+    : new Date(Date.now() + ringDurationSeconds * 1000).toISOString();
+
+  const payload: Record<string, unknown> = {
+    id,
+    itemId: item.id,
+    itemType: item.type,
+    fulfillerUserId,
+    fulfillerName,
+    requesterUserId,
+    requesterName,
+    chatId,
+    handshakeMode,
+    status: instant ? 'active' : 'awaiting_availability',
+    destinationLat: destination.lat,
+    destinationLng: destination.lng,
+    destinationLabel,
+    startedAt: instant ? now : null,
+    ringExpiresAt,
+    ringDurationSeconds: instant ? null : ringDurationSeconds,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  const { error } = await supabase.from('go_get_sessions').insert(payload);
+  if (error) {
+    if (isMissingTableError(error)) return { ok: false, errorMessage: MISSING_TABLE_MESSAGE };
+    return { ok: false, errorMessage: error.message };
+  }
+
+  const session = normalizeGoGetSession(payload);
+
+  const messageId = `msg_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+  if (!instant) {
+    await createSupabaseMessage(
+      chatId,
+      `📦 ${requesterName} wants to Go Get "${item.title}". Are you available for pickup right now?`,
+      requesterUserId,
+      messageId,
+      { skipPush: true },
+    );
+  }
+
+  if (!instant) {
+    await runGoGetPushTask(() =>
+      import('./pushEvents').then((m) =>
+        m.notifyGoGetAvailabilityRequest({
+          item,
+          fulfillerUserId,
+          requesterName,
+          sessionId: id,
+          ringDurationSeconds,
+          ringPattern: fulfillerProfile?.goGetRingPattern,
+        }),
+      ),
+    );
+  }
+
+  return { ok: true, session };
+}
+
+export function isGoGetRingActive(session: GoGetSession): boolean {
+  if (session.status !== 'awaiting_availability') return false;
+  if (!session.ringExpiresAt) return true;
+  return Date.now() < new Date(session.ringExpiresAt).getTime();
+}
+
+/** Move a timed-out live ring into async scheduling for the requester. */
+export async function expireGoGetRing(
+  session: GoGetSession,
+): Promise<Result<{ session: GoGetSession }>> {
+  if (session.status !== 'awaiting_availability') {
+    return { ok: false, errorMessage: 'This request is no longer ringing.' };
+  }
+  if (isGoGetRingActive(session)) {
+    return { ok: false, errorMessage: 'Still waiting for a response.' };
+  }
+  const result = await updateSession(session.id, { status: 'awaiting_schedule' });
+  if (!result.ok || !result.session) return result;
+  return { ok: true, session: result.session };
+}
+
+/** End a live ring when the listing is gone — requester should not wait forever. */
+export async function abandonGoGetRing(
+  session: GoGetSession,
+  reason = 'Listing is no longer available',
+): Promise<Result<{ session: GoGetSession }>> {
+  if (session.status !== 'awaiting_availability') {
+    return { ok: false, errorMessage: 'This request is no longer ringing.' };
+  }
+  const result = await updateSession(session.id, {
+    status: 'cancelled',
+    cancelledAt: new Date().toISOString(),
+    cancelReason: reason,
+    fulfillerSharingLocation: false,
+  });
+  if (!result.ok || !result.session) return result;
+
+  await createSupabaseMessage(
+    session.chatId,
+    `❌ This pickup request ended: ${reason}.`,
+    session.fulfillerUserId,
+    `msg_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+    { skipPush: true },
+  );
+  return { ok: true, session: result.session };
+}
+
+/** Requester picks a meet time after the live ring timed out (no urgent ring). */
+export async function requesterProposeScheduledMeet(
+  session: GoGetSession,
+  item: ItemPost,
+  scheduledAt: string,
+  schedules: {
+    poster: Pick<UserProfile, 'pickupAvailability'>;
+    requester: Pick<UserProfile, 'pickupAvailability'>;
+  },
+): Promise<Result<{ session: GoGetSession }>> {
+  if (session.status !== 'awaiting_schedule') {
+    return { ok: false, errorMessage: 'This pickup is not awaiting a scheduled time.' };
+  }
+  const chosen = new Date(scheduledAt);
+  if (Number.isNaN(chosen.getTime())) {
+    return { ok: false, errorMessage: 'Pick a valid time.' };
+  }
+  const posterSchedule = getPickupAvailability(schedules.poster);
+  const requesterSchedule = getPickupAvailability(schedules.requester);
+  if (!isTimeInSharedAvailability(posterSchedule, requesterSchedule, scheduledAt)) {
+    return { ok: false, errorMessage: 'Pick a time when both of you are within your pickup availability.' };
+  }
+
+  const result = await updateSession(session.id, { status: 'scheduled', scheduledAt });
+  if (!result.ok || !result.session) return result;
+
+  const whenLabel = chosen.toLocaleString(undefined, {
+    weekday: 'short',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+
+  await createSupabaseMessage(
+    session.chatId,
+    `📅 ${session.requesterName} scheduled pickup for ${whenLabel}.`,
+    session.requesterUserId,
+    `msg_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+    { skipPush: true },
+  );
+  await runGoGetPushTask(() =>
+    import('./pushEvents').then((m) =>
+      m.notifyGoGetScheduleConfirmed({
+        item,
+        fulfillerUserId: session.fulfillerUserId,
+        requesterName: session.requesterName,
+        whenLabel,
+        sessionId: session.id,
+      }),
+    ),
+  );
+  return { ok: true, session: result.session };
+}
+
+async function updateSession(
+  sessionId: string,
+  patch: Record<string, unknown>,
+): Promise<{ ok: boolean; errorMessage?: string; session?: GoGetSession }> {
+  const { data, error } = await supabase
+    .from('go_get_sessions')
+    .update({ ...patch, updatedAt: new Date().toISOString() })
+    .eq('id', sessionId)
+    .select('*')
+    .maybeSingle();
+  if (error) {
+    if (isMissingTableError(error)) return { ok: false, errorMessage: MISSING_TABLE_MESSAGE };
+    return { ok: false, errorMessage: error.message };
+  }
+  if (!data) return { ok: false, errorMessage: 'Session not found.' };
+  return { ok: true, session: normalizeGoGetSession(data as Record<string, unknown>) };
+}
+
+/** Fulfiller: "Yes, I'm available now" — starts the ready-to-drive state immediately. */
+export async function respondAvailableNow(
+  session: GoGetSession,
+  item: ItemPost,
+): Promise<Result<{ session: GoGetSession }>> {
+  if (session.status !== 'awaiting_availability') {
+    return { ok: false, errorMessage: 'This request was already answered.' };
+  }
+  const now = new Date().toISOString();
+  const result = await updateSession(session.id, {
+    status: 'scheduled',
+    scheduledAt: now,
+    fulfillerReadyAt: now,
+  });
+  if (!result.ok || !result.session) return result;
+
+  await createSupabaseMessage(
+    session.chatId,
+    `✅ ${session.fulfillerName} is available now — ${session.requesterName} can head over.`,
+    session.fulfillerUserId,
+    `msg_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+    { skipPush: true },
+  );
+  await runGoGetPushTask(() =>
+    import('./pushEvents').then((m) =>
+      m.notifyGoGetAvailableNow({
+        item,
+        requesterUserId: session.requesterUserId,
+        fulfillerName: session.fulfillerName,
+        sessionId: session.id,
+      }),
+    ),
+  );
+  return { ok: true, session: result.session };
+}
+
+/** Fulfiller: "No, but I'm free between X and Y." */
+export async function proposeAvailabilityWindow(
+  session: GoGetSession,
+  item: ItemPost,
+  window: { from: string; until: string },
+): Promise<Result<{ session: GoGetSession }>> {
+  if (session.status !== 'awaiting_availability') {
+    return { ok: false, errorMessage: 'This request was already answered.' };
+  }
+  if (new Date(window.until).getTime() <= new Date(window.from).getTime()) {
+    return { ok: false, errorMessage: 'The end time must be after the start time.' };
+  }
+
+  const result = await updateSession(session.id, {
+    status: 'window_offered',
+    availableFrom: window.from,
+    availableUntil: window.until,
+  });
+  if (!result.ok || !result.session) return result;
+
+  const windowLabel = `between ${new Date(window.from).toLocaleTimeString(undefined, {
+    hour: 'numeric',
+    minute: '2-digit',
+  })} and ${new Date(window.until).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`;
+
+  await createSupabaseMessage(
+    session.chatId,
+    `🕐 ${session.fulfillerName} isn't available right now, but is free ${windowLabel}.`,
+    session.fulfillerUserId,
+    `msg_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+    { skipPush: true },
+  );
+  await runGoGetPushTask(() =>
+    import('./pushEvents').then((m) =>
+      m.notifyGoGetScheduleProposed({
+        item,
+        requesterUserId: session.requesterUserId,
+        fulfillerName: session.fulfillerName,
+        windowLabel,
+        sessionId: session.id,
+      }),
+    ),
+  );
+  return { ok: true, session: result.session };
+}
+
+/** Requester: pick a specific time inside the fulfiller's offered window. */
+export async function pickScheduledTime(
+  session: GoGetSession,
+  item: ItemPost,
+  scheduledAt: string,
+): Promise<Result<{ session: GoGetSession }>> {
+  if (session.status !== 'window_offered') {
+    return { ok: false, errorMessage: 'This pickup is not awaiting a scheduled time.' };
+  }
+  const chosen = new Date(scheduledAt).getTime();
+  const from = session.availableFrom ? new Date(session.availableFrom).getTime() : -Infinity;
+  const until = session.availableUntil ? new Date(session.availableUntil).getTime() : Infinity;
+  if (Number.isNaN(chosen) || chosen < from || chosen > until) {
+    return { ok: false, errorMessage: 'Pick a time inside the available window.' };
+  }
+
+  const result = await updateSession(session.id, { status: 'scheduled', scheduledAt });
+  if (!result.ok || !result.session) return result;
+
+  const whenLabel = new Date(scheduledAt).toLocaleString(undefined, {
+    weekday: 'short',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+
+  await createSupabaseMessage(
+    session.chatId,
+    `📅 Pickup scheduled for ${whenLabel}. Both of you will get a reminder.`,
+    session.requesterUserId,
+    `msg_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+    { skipPush: true },
+  );
+  await runGoGetPushTask(() =>
+    import('./pushEvents').then((m) =>
+      m.notifyGoGetScheduleConfirmed({
+        item,
+        fulfillerUserId: session.fulfillerUserId,
+        requesterName: session.requesterName,
+        whenLabel,
+        sessionId: session.id,
+      }),
+    ),
+  );
+  return { ok: true, session: result.session };
+}
+
+/** Fulfiller taps Ready once the scheduled time has arrived. */
+export async function markFulfillerReady(
+  session: GoGetSession,
+  item: ItemPost,
+): Promise<Result<{ session: GoGetSession }>> {
+  if (session.status !== 'scheduled' || session.fulfillerReadyAt) {
+    return { ok: false, errorMessage: 'Nothing to confirm right now.' };
+  }
+  const result = await updateSession(session.id, { fulfillerReadyAt: new Date().toISOString() });
+  if (!result.ok || !result.session) return result;
+
+  await createSupabaseMessage(
+    session.chatId,
+    `✅ ${session.fulfillerName} is ready — ${session.requesterName} can Go Get it now.`,
+    session.fulfillerUserId,
+    `msg_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+    { skipPush: true },
+  );
+  await runGoGetPushTask(() =>
+    import('./pushEvents').then((m) =>
+      m.notifyGoGetFulfillerReady({
+        item,
+        requesterUserId: session.requesterUserId,
+        fulfillerName: session.fulfillerName,
+        sessionId: session.id,
+      }),
+    ),
+  );
+  return { ok: true, session: result.session };
+}
+
+/** Requester taps "Go Get" once the fulfiller is ready — this is what starts the trip. */
+export async function startGoGetTrip(
+  session: GoGetSession,
+  item: ItemPost,
+): Promise<Result<{ session: GoGetSession }>> {
+  if (session.status !== 'scheduled' || !session.fulfillerReadyAt) {
+    return { ok: false, errorMessage: `${session.fulfillerName} hasn't confirmed they're ready yet.` };
+  }
+  const result = await updateSession(session.id, { status: 'active', startedAt: new Date().toISOString() });
+  if (!result.ok || !result.session) return result;
+
+  await runGoGetPushTask(() =>
+    import('./pushEvents').then((m) =>
+      m.notifyGoGetStarted({
+        item,
+        fulfillerUserId: session.fulfillerUserId,
+        requesterName: session.requesterName,
+        sessionId: session.id,
+      }),
+    ),
+  );
+  return { ok: true, session: result.session };
+}
+
+export async function markGoGetArrived(
+  session: GoGetSession,
+  item: ItemPost,
+): Promise<Result<{ session: GoGetSession }>> {
+  if (session.status !== 'active') {
+    return { ok: false, errorMessage: 'This trip is not active.' };
+  }
+  const result = await updateSession(session.id, { status: 'arrived', arrivedAt: new Date().toISOString() });
+  if (!result.ok || !result.session) return result;
+
+  await runGoGetPushTask(() =>
+    import('./pushEvents').then((m) =>
+      m.notifyGoGetArrived({
+        item,
+        fulfillerUserId: session.fulfillerUserId,
+        requesterName: session.requesterName,
+        sessionId: session.id,
+      }),
+    ),
+  );
+  await clearLiveLocation(session.id);
+  return { ok: true, session: result.session };
+}
+
+/** Fulfiller confirms the handoff actually happened — separate item-type completion is handled by the caller. */
+export async function confirmGoGetCompletion(session: GoGetSession): Promise<Result<{ session: GoGetSession }>> {
+  if (session.status !== 'arrived') {
+    return { ok: false, errorMessage: 'Nothing to confirm yet.' };
+  }
+  const result = await updateSession(session.id, {
+    status: 'completed',
+    completedAt: new Date().toISOString(),
+    fulfillerSharingLocation: false,
+  });
+  if (!result.ok || !result.session) return result;
+  await clearLiveLocation(session.id);
+  await clearFulfillerLiveLocation(session.id);
+  return { ok: true, session: result.session };
+}
+
+/** Fulfiller disputes the handoff (item never actually handed off) — caller should also file a violation. */
+export async function disputeGoGetCompletion(
+  session: GoGetSession,
+  reason: string,
+): Promise<Result<{ session: GoGetSession }>> {
+  if (session.status !== 'arrived') {
+    return { ok: false, errorMessage: 'Nothing to dispute yet.' };
+  }
+  const result = await updateSession(session.id, { status: 'disputed', cancelReason: reason, fulfillerSharingLocation: false });
+  if (!result.ok || !result.session) return result;
+  await clearLiveLocation(session.id);
+  await clearFulfillerLiveLocation(session.id);
+  return { ok: true, session: result.session };
+}
+
+export async function cancelGoGetSession(
+  session: GoGetSession,
+  item: ItemPost,
+  cancelledByUserId: string,
+  reason?: string,
+): Promise<Result<{ session: GoGetSession }>> {
+  if (isTerminalGoGetStatus(session.status)) {
+    return { ok: false, errorMessage: 'This Go Get is already finished.' };
+  }
+  const result = await updateSession(session.id, {
+    status: 'cancelled',
+    cancelledAt: new Date().toISOString(),
+    cancelledByUserId,
+    cancelReason: reason ?? null,
+    fulfillerSharingLocation: false,
+  });
+  if (!result.ok || !result.session) return result;
+
+  const otherUserId =
+    cancelledByUserId === session.fulfillerUserId ? session.requesterUserId : session.fulfillerUserId;
+  const cancelledByName =
+    cancelledByUserId === session.fulfillerUserId ? session.fulfillerName : session.requesterName;
+
+  await createSupabaseMessage(
+    session.chatId,
+    `❌ ${cancelledByName} cancelled this Go Get${reason ? `: ${reason}` : '.'}`,
+    cancelledByUserId,
+    `msg_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+    { skipPush: true },
+  );
+  await runGoGetPushTask(() =>
+    import('./pushEvents').then((m) =>
+      m.notifyGoGetCancelled({ item, recipientUserId: otherUserId, cancelledByName, sessionId: session.id }),
+    ),
+  );
+  await clearLiveLocation(session.id);
+  await clearFulfillerLiveLocation(session.id);
+  return { ok: true, session: result.session };
+}
+
+/** Fulfiller opts in/out of sharing their live location with the picker during pickup. */
+export async function setFulfillerSharingLocation(
+  session: GoGetSession,
+  enabled: boolean,
+): Promise<Result<{ session: GoGetSession }>> {
+  if (!['active', 'arrived'].includes(session.status)) {
+    return { ok: false, errorMessage: 'Location sharing is only available during an active pickup.' };
+  }
+  const result = await updateSession(session.id, { fulfillerSharingLocation: enabled });
+  if (!result.ok || !result.session) return result;
+  if (!enabled) {
+    await clearFulfillerLiveLocation(session.id);
+  }
+  return { ok: true, session: result.session };
+}
+
+// ---------------------------------------------------------------------------
+// Live location — one row per session, latest position only. See RLS: only
+// the requester's own device may write it; both participants may read it.
+// ---------------------------------------------------------------------------
+
+// Throttle trail recording: one point every 30 s OR if moved > 30 m from last point.
+const _trailLastTime = new Map<string, number>();
+const _trailLastCoord = new Map<string, [number, number]>();
+const TRAIL_MIN_INTERVAL_MS = 30_000;
+const TRAIL_MIN_DISTANCE_M = 30;
+
+function haversineMetersSimple(a: [number, number], b: [number, number]): number {
+  const R = 6371000;
+  const dLat = ((b[0] - a[0]) * Math.PI) / 180;
+  const dLng = ((b[1] - a[1]) * Math.PI) / 180;
+  const sinDLat = Math.sin(dLat / 2);
+  const sinDLng = Math.sin(dLng / 2);
+  const x = sinDLat * sinDLat + Math.cos((a[0] * Math.PI) / 180) * Math.cos((b[0] * Math.PI) / 180) * sinDLng * sinDLng;
+  return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
+}
+
+async function appendLocationTrailPoint(
+  sessionId: string,
+  position: { lat: number; lng: number; heading?: number | null; speedMph?: number | null; etaSeconds?: number | null; distanceMeters?: number | null },
+): Promise<void> {
+  try {
+    await supabase.from('go_get_location_trail').insert({
+      id: `trail_${sessionId}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      sessionId,
+      lat: position.lat,
+      lng: position.lng,
+      heading: position.heading ?? null,
+      speedMph: position.speedMph ?? null,
+      etaSeconds: position.etaSeconds ?? null,
+      distanceMeters: position.distanceMeters ?? null,
+      recordedAt: new Date().toISOString(),
+    });
+  } catch {
+    // best-effort; trail table may not exist yet
+  }
+}
+
+export async function upsertLiveLocation(
+  sessionId: string,
+  position: {
+    lat: number;
+    lng: number;
+    heading?: number | null;
+    speedMph?: number | null;
+    etaSeconds?: number | null;
+    distanceMeters?: number | null;
+  },
+): Promise<void> {
+  try {
+    await supabase.from('go_get_live_locations').upsert({
+      sessionId,
+      lat: position.lat,
+      lng: position.lng,
+      heading: position.heading ?? null,
+      speedMph: position.speedMph ?? null,
+      etaSeconds: position.etaSeconds ?? null,
+      distanceMeters: position.distanceMeters ?? null,
+      updatedAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.warn('Could not update Go Get live location:', err);
+  }
+
+  // Append to location trail (throttled by time + distance).
+  const now = Date.now();
+  const lastTime = _trailLastTime.get(sessionId) ?? 0;
+  const lastCoord = _trailLastCoord.get(sessionId);
+  const elapsed = now - lastTime;
+  const dist = lastCoord ? haversineMetersSimple(lastCoord, [position.lat, position.lng]) : Infinity;
+
+  if (elapsed >= TRAIL_MIN_INTERVAL_MS || dist >= TRAIL_MIN_DISTANCE_M) {
+    _trailLastTime.set(sessionId, now);
+    _trailLastCoord.set(sessionId, [position.lat, position.lng]);
+    void appendLocationTrailPoint(sessionId, position);
+  }
+}
+
+export async function getLiveLocation(sessionId: string): Promise<GoGetLiveLocation | null> {
+  if (isPlayStoreDemo()) {
+    return getPlayStoreDemoLiveLocation(sessionId);
+  }
+  try {
+    const { data, error } = await supabase
+      .from('go_get_live_locations')
+      .select('*')
+      .eq('sessionId', sessionId)
+      .maybeSingle();
+    if (error || !data) return null;
+    return normalizeGoGetLiveLocation(data as Record<string, unknown>);
+  } catch {
+    return null;
+  }
+}
+
+export async function clearLiveLocation(sessionId: string): Promise<void> {
+  try {
+    await supabase.from('go_get_live_locations').delete().eq('sessionId', sessionId);
+  } catch {
+    // best effort — RLS/missing table are both fine to ignore here
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Fulfiller live location — optional opt-in so the picker can see where the
+// poster actually is vs. the listed pickup pin.
+// ---------------------------------------------------------------------------
+
+export async function upsertFulfillerLiveLocation(
+  sessionId: string,
+  position: { lat: number; lng: number; heading?: number | null },
+): Promise<void> {
+  try {
+    await supabase.from('go_get_fulfiller_live_locations').upsert({
+      sessionId,
+      lat: position.lat,
+      lng: position.lng,
+      heading: position.heading ?? null,
+      updatedAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.warn('Could not update Go Get fulfiller live location:', err);
+  }
+}
+
+export async function getFulfillerLiveLocation(sessionId: string): Promise<GoGetFulfillerLiveLocation | null> {
+  if (isPlayStoreDemo()) {
+    return getPlayStoreDemoFulfillerLiveLocation(sessionId);
+  }
+  try {
+    const { data, error } = await supabase
+      .from('go_get_fulfiller_live_locations')
+      .select('*')
+      .eq('sessionId', sessionId)
+      .maybeSingle();
+    if (error || !data) return null;
+    return normalizeGoGetFulfillerLiveLocation(data as Record<string, unknown>);
+  } catch {
+    return null;
+  }
+}
+
+export async function clearFulfillerLiveLocation(sessionId: string): Promise<void> {
+  try {
+    await supabase.from('go_get_fulfiller_live_locations').delete().eq('sessionId', sessionId);
+  } catch {
+    // best effort
+  }
+}
+
+export function subscribeToFulfillerLiveLocationChanges(
+  sessionId: string,
+  onChange: (location: GoGetFulfillerLiveLocation) => void,
+): () => void {
+  if (isPlayStoreDemo()) {
+    const loc = getPlayStoreDemoFulfillerLiveLocation(sessionId);
+    if (loc) onChange(loc);
+    return () => undefined;
+  }
+  return subscribePostgresChanges<Record<string, unknown>>(
+    {
+      channelName: `go-get-fulfiller-live-location-${sessionId}`,
+      table: 'go_get_fulfiller_live_locations',
+      event: '*',
+      filter: `sessionId=eq.${sessionId}`,
+    },
+    (payload) => {
+      const row = payload.new as Record<string, unknown> | undefined;
+      if (row && Object.keys(row).length > 0) onChange(normalizeGoGetFulfillerLiveLocation(row));
+    },
+  );
+}
+
+/** Live-updates for one session's status/fields (both participants see the same row). */
+export function subscribeToGoGetSession(
+  sessionId: string,
+  onChange: (session: GoGetSession) => void,
+): () => void {
+  return subscribePostgresChanges<Record<string, unknown>>(
+    {
+      channelName: `go-get-session-${sessionId}`,
+      table: 'go_get_sessions',
+      event: '*',
+      filter: `id=eq.${sessionId}`,
+    },
+    (payload) => {
+      const row = payload.new as Record<string, unknown> | undefined;
+      if (row && Object.keys(row).length > 0) onChange(normalizeGoGetSession(row));
+    },
+  );
+}
+
+export function subscribeToLiveLocationChanges(
+  sessionId: string,
+  onChange: (location: GoGetLiveLocation) => void,
+): () => void {
+  if (isPlayStoreDemo()) {
+    const loc = getPlayStoreDemoLiveLocation(sessionId);
+    if (loc) onChange(loc);
+    return () => undefined;
+  }
+  return subscribePostgresChanges<Record<string, unknown>>(
+    {
+      channelName: `go-get-live-location-${sessionId}`,
+      table: 'go_get_live_locations',
+      event: '*',
+      filter: `sessionId=eq.${sessionId}`,
+    },
+    (payload) => {
+      const row = payload.new as Record<string, unknown> | undefined;
+      if (row && Object.keys(row).length > 0) onChange(normalizeGoGetLiveLocation(row));
+    },
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Staff-only: bulk session access + location trail
+// ---------------------------------------------------------------------------
+
+export interface LocationTrailPoint {
+  id: string;
+  sessionId: string;
+  lat: number;
+  lng: number;
+  heading?: number | null;
+  speedMph?: number | null;
+  etaSeconds?: number | null;
+  distanceMeters?: number | null;
+  recordedAt: string;
+}
+
+export async function staffGetAllSessions(
+  options: {
+    statusFilter?: GoGetSessionStatus | 'all';
+    limit?: number;
+    offset?: number;
+  } = {},
+): Promise<GoGetSession[]> {
+  const { statusFilter = 'all', limit = 200, offset = 0 } = options;
+  try {
+    let q = supabase
+      .from('go_get_sessions')
+      .select('*')
+      .order('createdAt', { ascending: false })
+      .range(offset, offset + limit - 1);
+
+    if (statusFilter !== 'all') {
+      q = q.eq('status', statusFilter);
+    }
+
+    const { data, error } = await q;
+    if (error || !data) return [];
+    return data.map((r) => normalizeGoGetSession(r as Record<string, unknown>));
+  } catch {
+    return [];
+  }
+}
+
+export async function getSessionLocationTrail(sessionId: string): Promise<LocationTrailPoint[]> {
+  try {
+    const { data, error } = await supabase
+      .from('go_get_location_trail')
+      .select('*')
+      .eq('sessionId', sessionId)
+      .order('recordedAt', { ascending: true });
+
+    if (error || !data) return [];
+    return (data as Record<string, unknown>[]).map((r) => ({
+      id: String(r.id ?? ''),
+      sessionId: String(r.sessionId ?? ''),
+      lat: Number(r.lat ?? 0),
+      lng: Number(r.lng ?? 0),
+      heading: r.heading != null ? Number(r.heading) : null,
+      speedMph: r.speedMph != null ? Number(r.speedMph) : null,
+      etaSeconds: r.etaSeconds != null ? Number(r.etaSeconds) : null,
+      distanceMeters: r.distanceMeters != null ? Number(r.distanceMeters) : null,
+      recordedAt: String(r.recordedAt ?? ''),
+    }));
+  } catch {
+    return [];
+  }
+}
+
+export async function getLiveLocationForStaff(sessionId: string): Promise<GoGetLiveLocation | null> {
+  return getLiveLocation(sessionId);
+}
+
+export function subscribeToSessionForStaff(
+  sessionId: string,
+  onChange: (session: GoGetSession) => void,
+): () => void {
+  return subscribeToGoGetSession(sessionId, onChange);
+}
+
+type StaffSessionActor = Pick<UserProfile, 'uid' | 'displayName' | 'role'>;
+
+async function staffSessionItem(session: GoGetSession): Promise<ItemPost | null> {
+  return staffGetListingById(session.itemId);
+}
+
+async function postStaffSessionChatMessage(
+  session: GoGetSession,
+  actor: StaffSessionActor,
+  message: string,
+): Promise<void> {
+  await createSupabaseMessage(
+    session.chatId,
+    message,
+    actor.uid,
+    `msg_staff_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+    { skipPush: true },
+  );
+}
+
+/** Staff: cancel any non-terminal Go Get session. */
+export async function staffCancelGoGetSession(
+  session: GoGetSession,
+  actor: StaffSessionActor,
+  reason: string,
+): Promise<Result<{ session: GoGetSession }>> {
+  if (!isStaffRole(actor.role)) return { ok: false, errorMessage: 'Staff only.' };
+  if (isTerminalGoGetStatus(session.status)) {
+    return { ok: false, errorMessage: 'This session is already closed.' };
+  }
+  if (!reason.trim()) return { ok: false, errorMessage: 'A reason is required.' };
+
+  const item = await staffSessionItem(session);
+  if (!item) return { ok: false, errorMessage: 'Could not load the linked listing.' };
+
+  const result = await updateSession(session.id, {
+    status: 'cancelled',
+    cancelledAt: new Date().toISOString(),
+    cancelledByUserId: actor.uid,
+    cancelReason: `[Staff] ${reason.trim()}`,
+    fulfillerSharingLocation: false,
+  });
+  if (!result.ok || !result.session) return result;
+
+  const staffLabel = actor.displayName || 'Staff';
+  await postStaffSessionChatMessage(
+    session,
+    actor,
+    `🛡️ ${staffLabel} cancelled this Go Get: ${reason.trim()}`,
+  );
+
+  await runGoGetPushTask(() =>
+    import('./pushEvents').then((m) =>
+      m.notifyGoGetCancelled({
+        item,
+        recipientUserId: session.requesterUserId,
+        cancelledByName: staffLabel,
+        sessionId: session.id,
+      }),
+    ),
+  );
+  await runGoGetPushTask(() =>
+    import('./pushEvents').then((m) =>
+      m.notifyGoGetCancelled({
+        item,
+        recipientUserId: session.fulfillerUserId,
+        cancelledByName: staffLabel,
+        sessionId: session.id,
+      }),
+    ),
+  );
+  await clearLiveLocation(session.id);
+  await clearFulfillerLiveLocation(session.id);
+  return { ok: true, session: result.session };
+}
+
+/** Staff: mark an arrived session complete when parties need help closing it out. */
+export async function staffCompleteGoGetSession(
+  session: GoGetSession,
+  actor: StaffSessionActor,
+  note?: string,
+): Promise<Result<{ session: GoGetSession }>> {
+  if (!isStaffRole(actor.role)) return { ok: false, errorMessage: 'Staff only.' };
+  if (session.status !== 'arrived') {
+    return { ok: false, errorMessage: 'Only arrived sessions can be marked complete.' };
+  }
+
+  const result = await updateSession(session.id, {
+    status: 'completed',
+    completedAt: new Date().toISOString(),
+    fulfillerSharingLocation: false,
+  });
+  if (!result.ok || !result.session) return result;
+
+  const staffLabel = actor.displayName || 'Staff';
+  await postStaffSessionChatMessage(
+    session,
+    actor,
+    `✅ ${staffLabel} marked this Go Get complete${note?.trim() ? `: ${note.trim()}` : '.'}`,
+  );
+  await clearLiveLocation(session.id);
+  await clearFulfillerLiveLocation(session.id);
+  return { ok: true, session: result.session };
+}
+
+/** Staff: expire a stale session that never finished scheduling or pickup. */
+export async function staffExpireGoGetSession(
+  session: GoGetSession,
+  actor: StaffSessionActor,
+  reason: string,
+): Promise<Result<{ session: GoGetSession }>> {
+  if (!isStaffRole(actor.role)) return { ok: false, errorMessage: 'Staff only.' };
+  if (isTerminalGoGetStatus(session.status)) {
+    return { ok: false, errorMessage: 'This session is already closed.' };
+  }
+  if (!reason.trim()) return { ok: false, errorMessage: 'A reason is required.' };
+
+  const result = await updateSession(session.id, {
+    status: 'expired',
+    cancelReason: `[Staff expired] ${reason.trim()}`,
+    fulfillerSharingLocation: false,
+  });
+  if (!result.ok || !result.session) return result;
+
+  const staffLabel = actor.displayName || 'Staff';
+  await postStaffSessionChatMessage(
+    session,
+    actor,
+    `⏱️ ${staffLabel} expired this Go Get: ${reason.trim()}`,
+  );
+  await clearLiveLocation(session.id);
+  await clearFulfillerLiveLocation(session.id);
+  return { ok: true, session: result.session };
+}
+
+/** Staff: mark a session disputed for review (e.g. handoff disagreement). */
+export async function staffDisputeGoGetSession(
+  session: GoGetSession,
+  actor: StaffSessionActor,
+  reason: string,
+): Promise<Result<{ session: GoGetSession }>> {
+  if (!isStaffRole(actor.role)) return { ok: false, errorMessage: 'Staff only.' };
+  if (!['active', 'arrived'].includes(session.status)) {
+    return { ok: false, errorMessage: 'Only active or arrived sessions can be disputed.' };
+  }
+  if (!reason.trim()) return { ok: false, errorMessage: 'A reason is required.' };
+
+  const result = await updateSession(session.id, {
+    status: 'disputed',
+    cancelReason: `[Staff dispute] ${reason.trim()}`,
+    fulfillerSharingLocation: false,
+  });
+  if (!result.ok || !result.session) return result;
+
+  const staffLabel = actor.displayName || 'Staff';
+  await postStaffSessionChatMessage(
+    session,
+    actor,
+    `⚠️ ${staffLabel} flagged this Go Get for review: ${reason.trim()}`,
+  );
+  await clearLiveLocation(session.id);
+  await clearFulfillerLiveLocation(session.id);
+  return { ok: true, session: result.session };
+}

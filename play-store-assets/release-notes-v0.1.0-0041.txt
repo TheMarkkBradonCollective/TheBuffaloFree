@@ -1,0 +1,8 @@
+Android beta v0.1.0.0041 (versionCode 41)
+
+What's new:
+• Notification taps land on the right screen — feed, inbox, chats, listings
+• Message-request alerts open your inbox (not a ghost chat)
+• Welcome feed post — founder intro for neighbor chit-chat
+
+Download (sideload): https://www.buffalobuynothing.com/download

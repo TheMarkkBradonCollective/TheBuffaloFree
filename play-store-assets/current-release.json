@@ -1,0 +1,12 @@
+{
+  "versionName": "0.2.0",
+  "versionCode": 53,
+  "betaLabel": "beta v0.2.0.0053",
+  "releaseName": "0.2.0 (53)",
+  "aabFile": "public/downloads/sac-buy-nothing-beta-v0.2.0.0053.aab",
+  "aabLegacyFile": "public/downloads/sac-buy-nothing.aab",
+  "aabDownloadUrl": "https://www.buffalobuynothing.com/downloads/sac-buy-nothing-beta-v0.2.0.0053.aab",
+  "releaseNotesFile": "play-store-assets/release-notes-v0.2.0-0053.txt",
+  "sideloadApk": "public/downloads/sac-buy-nothing-beta-v0.2.0.0053.apk",
+  "builtAt": "2026-08-25T03:07:34.512Z"
+}

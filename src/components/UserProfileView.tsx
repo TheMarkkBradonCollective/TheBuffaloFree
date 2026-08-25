@@ -1,0 +1,928 @@
+import React, { useState, useEffect } from 'react';
+import { UserProfile, BUFFALO_NEIGHBORHOODS, ItemPost } from '../types';
+import { isStaffRole } from '../lib/roles';
+import {
+  getNeighborStats,
+  NeighborStats,
+  upsertSupabaseProfile,
+  uploadProfilePhoto,
+  getSupabaseProfile,
+} from '../supabase';
+import { isLikelyImageFile, INVALID_IMAGE_FILE_MESSAGE } from '../lib/imageUrl';
+import {
+  isDicebearAvatarUrl,
+  photoUrlForProfileUpsert,
+  resolveIdentityDisplayName,
+} from '../lib/profilePersistence';
+import RoleBadge from './RoleBadge';
+import {
+  MapPin,
+  CheckCircle,
+  Save,
+  AlertCircle,
+  Trash2,
+  Download,
+  LogOut,
+  Smartphone,
+  Share2,
+  Store,
+  Gift,
+  Package,
+  Repeat2,
+  ChevronUp,
+  ChevronDown,
+  Camera,
+  Shield,
+  FileText,
+} from 'lucide-react';
+import ProfilePostList from './ProfilePostList';
+import ProfileAwardsRow from './ProfileAwardsRow';
+import ProfileFriendsRow from './ProfileFriendsRow';
+import ProfileAwardsSection from './ProfileAwardsSection';
+import UserAvatar from './UserAvatar';
+import { formatLastActive } from '../lib/presence';
+import { usePwaInstallPrompt } from '../hooks/usePwaInstallPrompt';
+import ThemeSettings from './ThemeSettings';
+import AccountNavigationSettings from './AccountNavigationSettings';
+import SystemPermissionsSettings from './SystemPermissionsSettings';
+import GoGetSettings from './GoGetSettings';
+import NewspaperExperienceSettings from '../preview/NewspaperExperienceSettings';
+import StaffModeSettings from './StaffModeSettings';
+import { isStaffActingOfficial, profileUiRole } from '../lib/staffInteractionMode';
+import CommunityMenuView from './CommunityMenuView';
+import PrivacyPolicyModal from './PrivacyPolicyModal';
+import TermsOfUseModal from './TermsOfUseModal';
+import { PRIVACY, TERMS } from '../siteContent';
+import { isPrivacyAccepted } from '../lib/privacyPolicyPrompt';
+import { isTermsAccepted } from '../lib/termsPolicyPrompt';
+import { getNeighborAwardClaims } from '../supabase';
+import { buildNeighborAwardSummary, type NeighborAwardSummary } from '../lib/neighborAwards';
+import GoGetRecordSection from './goget/GoGetRecordSection';
+import { openStaffApplyPanel } from '../lib/staffApplyOpen';
+import { useInstallVersions } from '../hooks/useInstallVersions';
+import { apkWebsiteAccessMessage, canDownloadApkFromWebsite } from '../lib/apkWebsiteAccess';
+import { SITE } from '../siteContent';
+import { detectInstallKind } from '../lib/installContext';
+import TrackedDownloadLink from './TrackedDownloadLink';
+
+interface UserProfileViewProps {
+  userProfile: UserProfile;
+  userPosts?: ItemPost[];
+  onViewPost?: (post: ItemPost) => void;
+  onRepostPost?: (post: ItemPost) => void;
+  onDeletePost?: (post: ItemPost) => void;
+  onUpdateProfile: (updated: UserProfile) => void;
+  /** Refresh feed/listings after avatar is saved */
+  onProfilePhotoSaved?: () => void;
+  onDeleteAccount?: () => void | Promise<void>;
+  onLogout?: () => void | Promise<void>;
+  onViewProfile?: (userId: string) => void;
+  onOpenAwards?: () => void;
+  onOpenDownload?: () => void;
+  scrollToDirectorOverview?: boolean;
+  onClearScrollToDirectorOverview?: () => void;
+  /** Edge-to-edge sections (mobile tab) — no nested card frames */
+  fullBleed?: boolean;
+}
+
+function sanitizeRemotePhoto(url?: string): string | undefined {
+  if (!url) return undefined;
+  if (url.startsWith('http://') || url.startsWith('https://')) return url;
+  return undefined;
+}
+
+type ProfileTab = 'profile' | 'settings' | 'account';
+
+const PROFILE_TABS: Array<{ id: ProfileTab; label: string }> = [
+  { id: 'profile', label: 'Profile' },
+  { id: 'settings', label: 'Settings' },
+  { id: 'account', label: 'Account' },
+];
+
+export default function UserProfileView({
+  userProfile,
+  userPosts = [],
+  onViewPost,
+  onRepostPost,
+  onDeletePost,
+  onUpdateProfile,
+  onProfilePhotoSaved,
+  onDeleteAccount,
+  onLogout,
+  onViewProfile,
+  onOpenAwards,
+  onOpenDownload,
+  scrollToDirectorOverview,
+  onClearScrollToDirectorOverview,
+  fullBleed = false,
+}: UserProfileViewProps) {
+  const [displayName, setDisplayName] = useState(userProfile.displayName);
+  const [neighborhood, setNeighborhood] = useState(userProfile.neighborhood);
+  const [bio, setBio] = useState(userProfile.bio || '');
+  const [photoURL, setPhotoURL] = useState(
+    userProfile.photoURL || `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(userProfile.uid)}`,
+  );
+  const [isPhotoUploading, setIsPhotoUploading] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [stats, setStats] = useState<NeighborStats | null>(null);
+  const [errorMsg, setErrorMsg] = useState('');
+  const [successMsg, setSuccessMsg] = useState('');
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
+  const [showPrivacyModal, setShowPrivacyModal] = useState(false);
+  const [showTermsModal, setShowTermsModal] = useState(false);
+  const [awardSummary, setAwardSummary] = useState<NeighborAwardSummary | null>(null);
+  const [awardsLoading, setAwardsLoading] = useState(!!onOpenAwards);
+  const [activeTab, setActiveTab] = useState<ProfileTab>('profile');
+  const { apkDownloadHref, latestApk, apkStatus, loading: apkVersionLoading } = useInstallVersions(userProfile);
+  const installKind = typeof window !== 'undefined' ? detectInstallKind() : 'browser';
+  const usingApk = installKind === 'android-apk';
+  const canDownloadApk = canDownloadApkFromWebsite(userProfile);
+  const apkAccessMessage = apkWebsiteAccessMessage(userProfile);
+
+  const openDownloadPage = (event?: React.MouseEvent) => {
+    event?.preventDefault();
+    if (onOpenDownload) {
+      onOpenDownload();
+      return;
+    }
+    window.location.assign('/download');
+  };
+
+  useEffect(() => {
+    getNeighborStats(userProfile.uid).then(setStats);
+  }, [userProfile.uid]);
+
+  useEffect(() => {
+    if (isSaving || isPhotoUploading) return;
+    setDisplayName((prev) =>
+      resolveIdentityDisplayName({
+        existingDisplayName: prev,
+        incomingDisplayName: userProfile.displayName,
+        email: userProfile.email,
+      }),
+    );
+    setNeighborhood(userProfile.neighborhood);
+    setBio(userProfile.bio || '');
+  }, [userProfile.uid, userProfile.displayName, userProfile.neighborhood, userProfile.bio, userProfile.email, isSaving, isPhotoUploading]);
+
+  useEffect(() => {
+    if (!onOpenAwards) return;
+    let cancelled = false;
+    setAwardsLoading(true);
+    void Promise.all([getNeighborStats(userProfile.uid), getNeighborAwardClaims(userProfile.uid)]).then(
+      ([nextStats, claims]) => {
+        if (cancelled) return;
+        setAwardSummary(
+          buildNeighborAwardSummary({
+            userId: userProfile.uid,
+            posts: userPosts,
+            claims,
+            stats: nextStats,
+          }),
+        );
+        setAwardsLoading(false);
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [onOpenAwards, userProfile.uid, userPosts]);
+
+  useEffect(() => {
+    if (isPhotoUploading) return;
+    setPhotoURL((prev) => {
+      const incomingReal = photoUrlForProfileUpsert(userProfile.photoURL);
+      const prevReal = photoUrlForProfileUpsert(prev);
+      if (incomingReal) return incomingReal;
+      if (prevReal && isDicebearAvatarUrl(userProfile.photoURL)) return prevReal;
+      return (
+        userProfile.photoURL ||
+        `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(userProfile.uid)}`
+      );
+    });
+  }, [userProfile.photoURL, userProfile.uid, isPhotoUploading]);
+
+  // PWA install status — shared listener, see usePwaInstallPrompt.
+  const { canPromptInstall, isInstalled: isAppInstalled, promptInstall } = usePwaInstallPrompt();
+  const [activeManualPlatform, setActiveManualPlatform] = useState<'ios' | 'android' | 'chrome'>('ios');
+
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!displayName.trim()) {
+      setErrorMsg('Display name is required.');
+      return;
+    }
+    if (isPhotoUploading) {
+      setErrorMsg('Please wait for your photo upload to finish.');
+      return;
+    }
+
+    setIsSaving(true);
+    setErrorMsg('');
+    setSuccessMsg('');
+
+    const resolvePhotoForSave = (): string | undefined => {
+      if (photoURL.startsWith('data:') || photoURL.startsWith('blob:')) {
+        return sanitizeRemotePhoto(userProfile.photoURL);
+      }
+      if (isDicebearAvatarUrl(photoURL)) {
+        return sanitizeRemotePhoto(userProfile.photoURL);
+      }
+      return sanitizeRemotePhoto(photoURL);
+    };
+
+    const photoForSave = resolvePhotoForSave();
+
+    const updateData = {
+      displayName: displayName.trim(),
+      neighborhood,
+      bio: bio.trim(),
+      ...(photoForSave !== undefined ? { photoURL: photoForSave } : {}),
+    };
+
+    try {
+      const updatedProfile = {
+        ...userProfile,
+        ...updateData
+      };
+
+      // Sync to Supabase
+      const { ok, errorMessage } = await upsertSupabaseProfile(updatedProfile, { scope: 'identity' });
+      if (!ok) {
+        throw new Error(errorMessage || 'Profile save failed');
+      }
+      onUpdateProfile(updatedProfile);
+      setErrorMsg('');
+      setSuccessMsg('Profile settings synced successfully.');
+      setTimeout(() => setSuccessMsg(''), 4000);
+    } catch (err) {
+      console.warn('Failed to commit profile updates:', err);
+      const detail = err instanceof Error ? err.message : '';
+      setErrorMsg(
+        detail && detail !== 'Profile save failed'
+          ? detail
+          : 'Unable to save profile to the database. Please try again.',
+      );
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handlePhotoPick = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    if (!isLikelyImageFile(file)) {
+      setErrorMsg(INVALID_IMAGE_FILE_MESSAGE);
+      event.target.value = '';
+      return;
+    }
+    if (file.size > 6 * 1024 * 1024) {
+      setErrorMsg('Image is too large. Please use a file under 6MB.');
+      event.target.value = '';
+      return;
+    }
+
+    setErrorMsg('');
+    setSuccessMsg('');
+    setIsPhotoUploading(true);
+
+    const previousPhoto = photoURL;
+    const previewUrl = URL.createObjectURL(file);
+    setPhotoURL(previewUrl);
+
+    try {
+      const uploadedUrl = await uploadProfilePhoto(file, userProfile.uid);
+      if (!uploadedUrl) {
+        setPhotoURL(previousPhoto);
+        setErrorMsg(
+          'Could not upload profile photo. Check your connection and Supabase storage (avatars bucket), then try again.',
+        );
+        return;
+      }
+
+      setPhotoURL(uploadedUrl);
+
+      const updatedProfile = {
+        ...userProfile,
+        photoURL: uploadedUrl,
+      };
+
+      const { ok, errorMessage } = await upsertSupabaseProfile(updatedProfile, { scope: 'identity' });
+      if (!ok) {
+        setPhotoURL(previousPhoto);
+        throw new Error(errorMessage || 'Profile photo could not be saved.');
+      }
+
+      const refreshed = await getSupabaseProfile(userProfile.uid);
+      const profileToApply = refreshed?.photoURL
+        ? { ...updatedProfile, photoURL: refreshed.photoURL }
+        : updatedProfile;
+
+      onUpdateProfile(profileToApply);
+      if (profileToApply.photoURL) {
+        setPhotoURL(profileToApply.photoURL);
+      }
+      onProfilePhotoSaved?.();
+      setSuccessMsg('Profile photo saved.');
+      setTimeout(() => setSuccessMsg(''), 3500);
+    } catch (err) {
+      console.warn('Profile photo save failed:', err);
+      const detail = err instanceof Error ? err.message : '';
+      setErrorMsg(detail || 'Could not save profile photo. Please try again.');
+    } finally {
+      URL.revokeObjectURL(previewUrl);
+      setIsPhotoUploading(false);
+      event.target.value = '';
+    }
+  };
+
+  const sectionShell = fullBleed
+    ? 'border-b border-app px-4 py-6 bg-surface'
+    : 'sbn-section';
+
+  const joinedLabel = (() => {
+    const raw = userProfile.createdAt;
+    const ms =
+      raw && typeof raw === 'object' && 'seconds' in raw
+        ? Number((raw as { seconds: number }).seconds) * 1000
+        : new Date(raw as string | number | Date).getTime();
+    const date = new Date(ms);
+    return Number.isNaN(date.getTime()) ? 'recently' : date.toLocaleDateString();
+  })();
+
+  return (
+    <div
+      className={`${fullBleed ? 'font-sans' : 'space-y-6'} w-full max-w-full min-w-0 overflow-x-hidden`}
+      id="profile_root_container"
+    >
+      <div
+        className={`${fullBleed ? 'sticky top-0 z-10 bg-surface/95 backdrop-blur-sm border-b border-app px-4 py-3' : 'mb-2'}`}
+        id="profile_tab_bar"
+      >
+        <div
+          className="flex gap-1 p-1 rounded-xl bg-inset border border-app w-full"
+          role="tablist"
+          aria-label="Profile sections"
+        >
+          {PROFILE_TABS.map(({ id, label }) => (
+            <button
+              key={id}
+              type="button"
+              role="tab"
+              id={`profile_tab_${id}`}
+              aria-selected={activeTab === id}
+              onClick={() => setActiveTab(id)}
+              className={`flex-1 min-w-0 px-2 sm:px-3 py-2 rounded-lg text-[11px] sm:text-sm font-bold transition-colors leading-tight text-center ${
+                activeTab === id
+                  ? 'bg-accent text-on-accent shadow-sm'
+                  : 'text-muted hover:text-app hover:bg-surface'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {activeTab === 'profile' ? (
+        <div
+          className={fullBleed ? 'flex flex-col min-w-0 w-full gap-6' : 'space-y-6'}
+          id="profile_tab_panel_profile"
+        >
+        <div
+          className={`${fullBleed ? sectionShell : 'sbn-section'} flex flex-col items-center text-center h-fit`}
+        >
+          <UserAvatar
+            uid={userProfile.uid}
+            src={photoURL}
+            name={displayName}
+            size="xl"
+            lastActiveAt={userProfile.lastActiveAt}
+            borderClassName="border-accent"
+          />
+          <p className="text-[10px] font-semibold text-emerald-400 mt-2">
+            {formatLastActive(userProfile.lastActiveAt)}
+          </p>
+          <label
+            htmlFor="profile_photo_upload"
+            className={`mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-bold border ${
+              isPhotoUploading
+                ? 'bg-accent text-on-accent border-accent'
+                : 'bg-inset text-app border-app hover:bg-surface-hover cursor-pointer'
+            }`}
+          >
+            <Camera className={`w-3.5 h-3.5 ${isPhotoUploading ? 'animate-pulse' : ''}`} />
+            {isPhotoUploading ? 'Saving photo…' : 'Change photo'}
+          </label>
+          <input
+            id="profile_photo_upload"
+            type="file"
+            accept="image/*"
+            onChange={handlePhotoPick}
+            className="hidden"
+          />
+          <h3 className="text-xl font-bold text-app mt-4 tracking-tight">{displayName}</h3>
+          
+          <RoleBadge role={profileUiRole(userProfile)} showForUser />
+
+          <div className="flex items-center space-x-1.5 px-3 py-1.5 bg-accent/10 border border-accent/20 rounded-full text-xs font-bold text-accent mt-3">
+            <MapPin className="w-3.5 h-3.5 text-accent" />
+            <span>{userProfile.neighborhood} Sector</span>
+          </div>
+
+          <div className="space-y-2 mt-4 w-full">
+            <div className="grid grid-cols-3 gap-2">
+              <div className="bg-inset border border-app rounded-xl p-3 text-center">
+                <Gift className="w-5 h-5 text-accent mx-auto mb-1" />
+                <p className="font-display text-lg font-bold text-app">{stats?.itemsGiven ?? '—'}</p>
+                <p className="text-[10px] text-muted">Items given</p>
+              </div>
+              <div className="bg-inset border border-app rounded-xl p-3 text-center">
+                <Package className="w-5 h-5 text-accent mx-auto mb-1" />
+                <p className="font-display text-lg font-bold text-app">{stats?.itemsClaimed ?? '—'}</p>
+                <p className="text-[10px] text-muted">Items claimed</p>
+              </div>
+              <div className="bg-inset border border-app rounded-xl p-3 text-center">
+                <Repeat2 className="w-5 h-5 text-accent mx-auto mb-1" />
+                <p className="font-display text-lg font-bold text-app">{stats?.tradesCompleted ?? '—'}</p>
+                <p className="text-[10px] text-muted">Trades</p>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="bg-inset border border-app rounded-xl p-3 text-center">
+                <ChevronUp className="w-5 h-5 text-accent mx-auto mb-1" />
+                <p className="font-display text-lg font-bold text-app">{stats?.upvotesReceived ?? '—'}</p>
+                <p className="text-[10px] text-muted">Upvotes received</p>
+              </div>
+              <div className="bg-inset border border-app rounded-xl p-3 text-center">
+                <ChevronDown className="w-5 h-5 text-muted mx-auto mb-1" />
+                <p className="font-display text-lg font-bold text-app">{stats?.downvotesReceived ?? '—'}</p>
+                <p className="text-[10px] text-muted">Downvotes received</p>
+              </div>
+            </div>
+          </div>
+
+          <ProfileAwardsRow
+            userId={userProfile.uid}
+            onOpenAwards={onOpenAwards}
+            viewerIsStaff={isStaffActingOfficial(userProfile)}
+          />
+
+          <ProfileFriendsRow
+            userId={userProfile.uid}
+            viewerUserId={userProfile.uid}
+            isOwnProfile
+            onViewProfile={onViewProfile}
+          />
+
+          <p className="text-xs text-muted mt-4 border-b border-app pb-4 w-full">
+            Joined our sharing circle: {joinedLabel}
+          </p>
+          
+          {userProfile.bio ? (
+            <p className="mt-4 text-xs font-medium text-muted italic leading-relaxed text-left w-full bg-inset p-3 rounded-xl border border-app">
+              &ldquo;{userProfile.bio}&rdquo;
+            </p>
+          ) : (
+            <p className="mt-4 text-xs font-semibold text-subtle italic text-left w-full bg-inset p-3 rounded-xl border border-dashed border-app">
+              No biography yet. Add one below to tell neighbors what you like to share or receive.
+            </p>
+          )}
+        </div>
+
+        {(errorMsg || successMsg) && (
+          <div className={fullBleed ? sectionShell : ''}>
+            {errorMsg ? (
+              <div
+                className="p-3 bg-red-950/50 border border-red-900 text-red-400 text-xs font-bold rounded-xl flex items-start gap-1.5 min-w-0"
+                id="profile_save_error"
+              >
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span className="min-w-0 break-words">{errorMsg}</span>
+              </div>
+            ) : null}
+            {successMsg ? (
+              <div
+                className="p-3 bg-green-950/50 border border-green-900 text-green-400 text-xs font-bold rounded-xl flex items-start gap-1.5 min-w-0"
+                id="profile_save_success"
+              >
+                <CheckCircle className="w-4 h-4 text-green-400 shrink-0" />
+                <span className="min-w-0 break-words">{successMsg}</span>
+              </div>
+            ) : null}
+          </div>
+        )}
+
+        <div className={fullBleed ? sectionShell : 'sbn-section'} id="profile_edit_section">
+          <form onSubmit={handleSave} className="space-y-5" id="profile_edit_form">
+            <div className="space-y-1.5">
+              <label className="text-sm font-bold text-muted uppercase block">My Email Address (Private)</label>
+              <input
+                type="text"
+                value={userProfile.email}
+                disabled
+                className="block w-full px-3.5 py-3 bg-inset border border-app rounded-xl text-xs font-mono text-subtle cursor-not-allowed opacity-60"
+              />
+              <p className="text-xs text-subtle leading-relaxed">
+                Your email is kept confidential and only used for your secure sign-in.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4" id="profile_inputs_row">
+              <div className="space-y-1.5">
+                <label htmlFor="pref_display_name" className="text-xs font-bold text-muted uppercase block">
+                  My Friendly Display Name
+                </label>
+                <input
+                  type="text"
+                  id="pref_display_name"
+                  required
+                  value={displayName}
+                  onChange={(e) => setDisplayName(e.target.value)}
+                  className="block w-full px-3.5 py-3 bg-inset border border-app rounded-xl text-app text-xs font-semibold focus:border-accent focus:ring-2 focus:ring-accent/20 transition-colors focus:outline-hidden"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label htmlFor="pref_neighborhood" className="text-xs font-bold text-muted uppercase block">
+                  My Home Neighborhood
+                </label>
+                <select
+                  id="pref_neighborhood"
+                  value={neighborhood}
+                  onChange={(e) => setNeighborhood(e.target.value)}
+                  className="block w-full px-3.5 py-3 bg-inset border border-app rounded-xl text-app text-xs font-bold cursor-pointer focus:border-accent focus:outline-hidden"
+                >
+                  {BUFFALO_NEIGHBORHOODS.map((n) => (
+                    <option key={n} value={n} className="bg-surface text-app select-dark-opt">
+                      {n}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <label htmlFor="pref_bio" className="text-xs font-bold text-muted uppercase block">
+                About Me / What I Love to Share
+              </label>
+              <textarea
+                id="pref_bio"
+                rows={4}
+                maxLength={500}
+                placeholder="Tell your neighbors who you are and why sharing matters to your household."
+                value={bio}
+                onChange={(e) => setBio(e.target.value)}
+                className="block w-full p-3 bg-inset border border-app rounded-xl text-xs text-app placeholder:text-subtle font-semibold resize-none focus:border-accent focus:ring-2 focus:ring-accent/20 transition-colors focus:outline-hidden"
+              />
+              <div className="text-right text-[10px] text-subtle font-mono font-medium">{bio.length}/500 chars</div>
+            </div>
+
+            <button
+              type="submit"
+              id="profile_save_btn"
+              disabled={isSaving}
+              className="w-full flex items-center justify-center space-x-2 py-3.5 bg-accent hover:bg-accent-hover text-on-accent rounded-xl text-xs font-bold uppercase tracking-wider transition-colors cursor-pointer"
+            >
+              <Save className="w-4 h-4 text-app" />
+              <span>{isSaving ? 'Saving Changes...' : 'Save Profile Changes'}</span>
+            </button>
+          </form>
+        </div>
+
+      {usingApk && (
+        <GoGetRecordSection userProfile={userProfile} className={fullBleed ? sectionShell : 'sbn-section'} />
+      )}
+
+      {onOpenAwards && (
+        <div className={fullBleed ? sectionShell : ''}>
+          <ProfileAwardsSection
+            summary={awardSummary}
+            loading={awardsLoading}
+            onOpenAwards={onOpenAwards}
+          />
+        </div>
+      )}
+
+      <div className={fullBleed ? sectionShell : 'sbn-section'}>
+        <div className="flex items-center justify-between gap-3 mb-3">
+          <h3 className="text-sm font-bold text-app uppercase tracking-wider">Your posts</h3>
+          <span className="text-xs text-muted">{userPosts.length}</span>
+        </div>
+        <ProfilePostList
+          posts={userPosts
+            .slice()
+            .sort((a, b) => new Date(b.updatedAt as any).getTime() - new Date(a.updatedAt as any).getTime())}
+          emptyMessage="You have not posted anything yet."
+          onViewPost={onViewPost}
+          onRepostPost={onRepostPost}
+          onDeletePost={onDeletePost}
+        />
+      </div>
+
+      {onViewProfile && !isStaffRole(userProfile.role) ? (
+        <CommunityMenuView
+          userProfile={userProfile}
+          onViewProfile={onViewProfile}
+          scrollToDirectorOverview={scrollToDirectorOverview}
+          onClearScrollToDirectorOverview={onClearScrollToDirectorOverview}
+          fullBleed={fullBleed}
+        />
+      ) : null}
+        </div>
+      ) : null}
+
+      {activeTab === 'settings' ? (
+        <div
+          className={fullBleed ? sectionShell : 'sbn-section'}
+          id="profile_tab_panel_settings"
+        >
+          <div
+            className="min-w-0 overflow-hidden mb-5 pb-5 border-b border-app"
+            id="pwa_installs_section"
+          >
+            <div className="flex items-center gap-2 mb-3">
+              <Smartphone className="w-4 h-4 text-accent" />
+              <h3 className="text-sm font-bold text-app uppercase tracking-wider">Install app</h3>
+            </div>
+            <p className="text-xs text-muted mb-4 leading-relaxed">
+              Install Buffalo Buy Nothing as an app for faster loads, push notifications, and a full-screen experience.
+              Home screen install is free for everyone; Google Play is for native Android; free APK sideload is only for our
+              first 500 neighbors.
+            </p>
+
+            <div className="flex flex-col gap-2 mb-4 min-w-0">
+              <a
+                href={SITE.playStoreBetaUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex w-full sm:w-auto items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold uppercase tracking-wide transition-colors"
+              >
+                <Store className="w-4 h-4 shrink-0" />
+                <span>Get it from Play Store</span>
+              </a>
+
+              <button
+                type="button"
+                onClick={openDownloadPage}
+                className="inline-flex w-full sm:w-auto items-center justify-center gap-2 px-4 py-2.5 border border-accent/40 bg-accent/10 hover:bg-accent/15 text-accent rounded-xl text-xs font-bold uppercase tracking-wide transition-colors cursor-pointer"
+              >
+                <Download className="w-4 h-4 shrink-0" />
+                <span>{canDownloadApk ? 'Compare Play, APK & home screen' : 'Compare Play & home screen'}</span>
+              </button>
+
+              {canDownloadApk && apkDownloadHref ? (
+                <TrackedDownloadLink
+                  href={apkDownloadHref}
+                  download={latestApk?.fileName || 'sac-buy-nothing.apk'}
+                  className="inline-flex w-full sm:w-auto items-center justify-center gap-2 px-4 py-2.5 bg-accent hover:bg-accent-hover text-on-accent rounded-xl text-xs font-bold uppercase tracking-wide transition-colors"
+                >
+                  <Download className="w-4 h-4 shrink-0" />
+                  <span>
+                    {apkVersionLoading
+                      ? 'Loading APK…'
+                      : latestApk?.betaLabel
+                        ? usingApk && apkStatus === 'update-available'
+                          ? `Update to ${latestApk.betaLabel}`
+                          : `Download ${latestApk.betaLabel}`
+                        : 'Download latest APK'}
+                  </span>
+                </TrackedDownloadLink>
+              ) : null}
+            </div>
+
+            {!canDownloadApk && apkAccessMessage ? (
+              <p className="text-xs text-muted bg-inset border border-app rounded-lg px-3 py-2 mb-4 leading-relaxed">
+                {apkAccessMessage}
+              </p>
+            ) : null}
+
+            {isAppInstalled ? (
+              <div className="flex items-center gap-2.5 px-4 py-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl" id="pwa_installed_badge">
+                <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+                <span className="text-xs font-bold text-emerald-400">App installed on this device</span>
+              </div>
+            ) : canPromptInstall ? (
+              <button
+                onClick={() => void promptInstall()}
+                className="inline-flex items-center gap-2 px-4 py-2.5 bg-accent hover:bg-accent-hover text-on-accent rounded-xl text-xs font-bold uppercase tracking-wide transition-colors cursor-pointer"
+                id="pwa_install_direct_trigger"
+              >
+                <Download className="w-4 h-4" />
+                <span>Install app</span>
+              </button>
+            ) : (
+              <div className="space-y-3">
+                <div className="flex border-b border-app overflow-x-auto gap-0">
+                  {(['ios', 'android', 'chrome'] as const).map((p) => (
+                    <button
+                      key={p}
+                      onClick={() => setActiveManualPlatform(p)}
+                      className={`shrink-0 py-2 px-3 text-xs font-bold uppercase tracking-wider border-b-2 transition-all ${
+                        activeManualPlatform === p
+                          ? 'border-accent text-accent'
+                          : 'border-transparent text-subtle hover:text-muted'
+                      }`}
+                    >
+                      {p === 'ios' ? 'iPhone' : p === 'android' ? 'Android' : 'Desktop'}
+                    </button>
+                  ))}
+                </div>
+                <div className="bg-inset border border-app p-4 rounded-xl text-xs text-muted space-y-2 leading-relaxed">
+                  {activeManualPlatform === 'ios' && (
+                    <ol className="list-decimal list-inside space-y-2 pl-1">
+                      <li>Open in <strong className="text-app">Safari</strong>.</li>
+                      <li>Tap the <strong className="text-app">Share</strong> button <Share2 className="inline w-3.5 h-3.5 mx-1" />.</li>
+                      <li>Tap <strong className="text-app">Add to Home Screen</strong>, then <strong className="text-app">Add</strong>.</li>
+                    </ol>
+                  )}
+                  {activeManualPlatform === 'android' && (
+                    <ol className="list-decimal list-inside space-y-2 pl-1">
+                      {canDownloadApk ? (
+                        <li>
+                          <strong className="text-app">APK (first 500 neighbors):</strong> open{' '}
+                          <button
+                            type="button"
+                            onClick={openDownloadPage}
+                            className="text-accent font-bold underline underline-offset-2 cursor-pointer"
+                          >
+                            download page
+                          </button>{' '}
+                          or use the APK button above.
+                        </li>
+                      ) : (
+                        <li>
+                          <strong className="text-app">Google Play:</strong> use{' '}
+                          <strong className="text-app">Download from Play Store</strong> above if you are on the invite list.
+                        </li>
+                      )}
+                      <li>
+                        <strong className="text-app">Or Chrome home screen:</strong> tap the three-dot menu{' '}
+                        <strong className="text-app">(⋮)</strong> → <strong className="text-app">Install app</strong> or{' '}
+                        <strong className="text-app">Add to Home Screen</strong>.
+                      </li>
+                    </ol>
+                  )}
+                  {activeManualPlatform === 'chrome' && (
+                    <ol className="list-decimal list-inside space-y-2 pl-1">
+                      <li>Look for the install icon in your browser's address bar.</li>
+                      <li>Click it and select <strong className="text-app">Install</strong>.</li>
+                    </ol>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <p className="text-xs text-muted mb-5 leading-relaxed">
+            Permissions, theme, navigation voice, and other app preferences.
+          </p>
+
+          <SystemPermissionsSettings />
+          <ThemeSettings userProfile={userProfile} onUpdateProfile={onUpdateProfile} />
+          <NewspaperExperienceSettings />
+          <AccountNavigationSettings userProfile={userProfile} onUpdateProfile={onUpdateProfile} />
+          {usingApk && (
+            <GoGetSettings userProfile={userProfile} onUpdateProfile={onUpdateProfile} />
+          )}
+        </div>
+      ) : null}
+
+      {activeTab === 'account' ? (
+        <div id="profile_tab_panel_account" className={fullBleed ? 'flex flex-col min-w-0 w-full gap-6' : 'space-y-6'}>
+      <StaffModeSettings userProfile={userProfile} onUpdateProfile={onUpdateProfile} />
+
+      {!isStaffRole(userProfile.role) ? (
+        <div className={fullBleed ? sectionShell : 'sbn-section'} id="account_staff_apply_section">
+          <div className="flex items-center gap-2 mb-3">
+            <Shield className="w-4 h-4 text-accent" />
+            <h3 className="text-sm font-bold text-app uppercase tracking-wider">Join the staff team</h3>
+          </div>
+          <p className="text-xs text-muted leading-relaxed mb-4">
+            Read what each role actually does, then apply for one. Tell us how fast you can respond
+            and if you&apos;ve been a mod elsewhere. Staff see one request at a time.
+          </p>
+          <button
+            type="button"
+            onClick={() => openStaffApplyPanel()}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-accent/40 bg-accent/10 text-accent text-xs font-bold uppercase tracking-wider hover:bg-accent/15 transition-colors"
+          >
+            View roles & apply
+          </button>
+        </div>
+      ) : null}
+
+      {/* ── Privacy & legal ──────────────────────────────────── */}
+      <div className={fullBleed ? sectionShell : 'sbn-section'} id="account_privacy_section">
+        <div className="flex items-center gap-2 mb-3">
+          <Shield className="w-4 h-4 text-accent" />
+          <h3 className="text-sm font-bold text-app uppercase tracking-wider">Privacy & legal</h3>
+        </div>
+        <div className="space-y-1 mb-4">
+          <p className="text-[10px] text-subtle font-semibold">
+            {isPrivacyAccepted(userProfile.uid)
+              ? `Privacy policy accepted (${PRIVACY.lastUpdated}).`
+              : 'Privacy policy not yet accepted — please review.'}
+          </p>
+          <p className="text-[10px] text-subtle font-semibold">
+            {isTermsAccepted(userProfile.uid)
+              ? `Terms of use accepted (${TERMS.lastUpdated}).`
+              : 'Terms of use not yet accepted — please review.'}
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setShowPrivacyModal(true)}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-app text-xs font-bold text-accent hover:bg-inset transition-colors"
+          >
+            <Shield className="w-3.5 h-3.5" />
+            {PRIVACY.shortTitle}
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowTermsModal(true)}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-app text-xs font-bold text-accent hover:bg-inset transition-colors"
+          >
+            <FileText className="w-3.5 h-3.5" />
+            {TERMS.shortTitle}
+          </button>
+        </div>
+      </div>
+
+      {/* ── Sign out ─────────────────────────────── (near bottom) */}
+      {onLogout ? (
+        <div className={fullBleed ? sectionShell : 'sbn-section'} id="account_sign_out_section">
+          <h3 className="text-sm font-bold text-app uppercase tracking-wider mb-2">Sign out</h3>
+          <p className="text-xs text-muted leading-relaxed mb-4">
+            Sign out of Buffalo Buy Nothing on this device. You can sign back in anytime.
+          </p>
+          <button
+            type="button"
+            onClick={() => void onLogout()}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-app text-app text-xs font-bold uppercase tracking-wider hover:bg-inset transition-colors cursor-pointer"
+          >
+            <LogOut className="w-4 h-4" />
+            <span>Sign out</span>
+          </button>
+        </div>
+      ) : null}
+
+      {/* ── Delete account ──────────────────────── (absolute bottom) */}
+      {onDeleteAccount && (
+        <div
+          className={fullBleed ? sectionShell : 'sbn-section border-red-900/40'}
+          id="account_delete_section"
+        >
+          <h3 className="text-sm font-bold text-red-500 uppercase tracking-wider mb-2">Delete account</h3>
+          <p className="text-xs text-muted leading-relaxed mb-4">
+            Permanently remove your profile, listings, comments, messages, and sign-in access.
+            This cannot be undone.
+          </p>
+          <button
+            type="button"
+            disabled={isDeletingAccount}
+            onClick={async () => {
+              setIsDeletingAccount(true);
+              setErrorMsg('');
+              try {
+                await onDeleteAccount();
+              } catch {
+                setErrorMsg('Could not delete account. Please try again.');
+              } finally {
+                setIsDeletingAccount(false);
+              }
+            }}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-red-900/50 text-red-500 text-xs font-bold uppercase tracking-wider hover:bg-red-950/30 transition-colors cursor-pointer disabled:opacity-50"
+          >
+            <Trash2 className="w-4 h-4" />
+            <span>{isDeletingAccount ? 'Deleting…' : 'Delete my account'}</span>
+          </button>
+        </div>
+      )}
+        </div>
+      ) : null}
+
+      {showPrivacyModal && (
+        <PrivacyPolicyModal
+          userId={userProfile.uid}
+          required={!isPrivacyAccepted(userProfile.uid)}
+          onAccepted={() => setShowPrivacyModal(false)}
+          onClose={() => setShowPrivacyModal(false)}
+        />
+      )}
+
+      {showTermsModal && (
+        <TermsOfUseModal
+          userId={userProfile.uid}
+          required={!isTermsAccepted(userProfile.uid)}
+          onAccepted={() => setShowTermsModal(false)}
+          onClose={() => setShowTermsModal(false)}
+        />
+      )}
+    </div>
+  );
+}
+

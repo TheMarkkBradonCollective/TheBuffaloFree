@@ -1,0 +1,6 @@
+Android beta 0.2.0 (50)
+
+• Newspaper look on the website and app
+• Buffalo Free lockup on the site
+• Hands app icon
+• Status and notification bars are black

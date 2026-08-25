@@ -1,0 +1,244 @@
+import { Fragment, useMemo, useState } from 'react';
+import { AlertCircle, Eye, MapPin, Search } from 'lucide-react';
+import { ItemPost } from '../../types';
+import { stripListingMetadata } from '../../lib/itemLocation';
+import { getPostTypeBadgeClass, getPostTypeGridBadgeLabel } from '../../lib/postType';
+import { extractListingImageUrls } from '../../lib/listingContent';
+import ListingImage from '../ListingImage';
+import HorizontalSnapRow, { SnapSlide } from '../HorizontalSnapRow';
+import { SITE } from '../../siteContent';
+import { useNewspaperSkin } from '../../preview/NewspaperSkinContext';
+
+interface GuestListingPreviewProps {
+  items: ItemPost[];
+  isLoading?: boolean;
+  onViewItem: (item: ItemPost) => void;
+  onRequireSignIn: () => void;
+  /** When nested inside the home page section layout */
+  embedded?: boolean;
+  /** Cap how many listings print on a newspaper page. */
+  maxItems?: number;
+  /** Skip these listing ids (already used as the lead / trending). */
+  excludeIds?: string[];
+}
+
+function formatClassifiedDate(createdAt: unknown): string {
+  if (!createdAt) return '';
+  const ms =
+    typeof createdAt === 'object' && createdAt !== null && 'seconds' in createdAt
+      ? (createdAt as { seconds: number }).seconds * 1000
+      : new Date(createdAt as string | number).getTime();
+  if (Number.isNaN(ms)) return '';
+  return new Date(ms).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+export default function GuestListingPreview({
+  items,
+  isLoading = false,
+  onViewItem,
+  onRequireSignIn,
+  embedded = false,
+  maxItems,
+  excludeIds,
+}: GuestListingPreviewProps) {
+  const { enabled: newspaperSkin } = useNewspaperSkin();
+  const [searchTerm, setSearchTerm] = useState('');
+
+  const previewItems = useMemo(() => {
+    const skip = new Set(excludeIds ?? []);
+    const active = items.filter((item) => item.status === 'active' && !skip.has(item.id));
+    const q = searchTerm.trim().toLowerCase();
+    const matched = q
+      ? active.filter((item) => {
+          const haystack = `${item.title} ${item.description} ${item.category} ${item.neighborhood}`.toLowerCase();
+          return haystack.includes(q);
+        })
+      : active;
+    if (typeof maxItems === 'number') return matched.slice(0, maxItems);
+    return matched;
+  }, [items, searchTerm, maxItems, excludeIds]);
+
+  const searchField = (
+    <div className="relative">
+      <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-subtle pointer-events-none" />
+      <input
+        type="search"
+        value={searchTerm}
+        onChange={(e) => setSearchTerm(e.target.value)}
+        placeholder={newspaperSkin ? 'Search The Free…' : 'Search listings…'}
+        className="sbn-input pl-11"
+        aria-label="Search listings"
+      />
+    </div>
+  );
+
+  const emptyState = isLoading && items.length === 0 ? (
+    <p className="text-sm text-muted text-center py-12">Loading listings…</p>
+  ) : previewItems.length === 0 ? (
+    <div className={newspaperSkin ? 'tbf-classified-empty' : 'sbn-card text-center py-12 px-6 border-dashed'}>
+      <AlertCircle className="w-10 h-10 text-muted mx-auto mb-3" />
+      <p className="font-display font-bold text-app">No active listings right now</p>
+      <p className="text-sm text-muted mt-2">{SITE.tagline}</p>
+      <button type="button" onClick={onRequireSignIn} className="sbn-btn sbn-btn-primary mt-4">
+        Sign in to post the first one
+      </button>
+    </div>
+  ) : null;
+
+  return (
+    <section className={embedded ? '' : 'mt-14'} id={embedded ? undefined : 'guest_listing_preview'}>
+      {newspaperSkin ? (
+        <div className="tbf-classified-toolbar">
+          <p className="tbf-classified-toolbar__intro">
+            Browse what neighbors are giving and looking for. Sign in to message, comment, or claim.
+          </p>
+          <button type="button" onClick={onRequireSignIn} className="sbn-btn sbn-btn-primary shrink-0">
+            Sign in to interact
+          </button>
+          {searchField}
+        </div>
+      ) : (
+        <>
+          <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3 mb-4">
+            <div>
+              <h2 className="font-display text-xl font-bold text-app">Live neighborhood listings</h2>
+              <p className="mt-1 text-sm text-muted">
+                Browse what neighbors are giving and looking for. Sign in to message, comment, or claim.
+              </p>
+            </div>
+            <button type="button" onClick={onRequireSignIn} className="sbn-btn sbn-btn-primary shrink-0">
+              Sign in to interact
+            </button>
+          </div>
+          <div className="sbn-card p-4 mb-4">{searchField}</div>
+        </>
+      )}
+
+      {emptyState}
+
+      {!emptyState && newspaperSkin && (
+        <div className="tbf-classified-sheet">
+          {previewItems.map((item) => {
+            const preview = stripListingMetadata(item.description);
+            const date = formatClassifiedDate(item.createdAt);
+            const kicker = [getPostTypeGridBadgeLabel(item.type), item.category].filter(Boolean).join(' — ');
+            const photos = item.imageUrls?.length ? item.imageUrls : extractListingImageUrls(item);
+            const cover = photos[0];
+
+            return (
+              <article key={item.id} className="tbf-classified tbf-story">
+                <div className="tbf-story__copy">
+                  <span className="tbf-classified__kicker">{kicker}</span>
+                  <button type="button" onClick={() => onViewItem(item)} className="text-left w-full cursor-pointer">
+                    <h3>{item.title}</h3>
+                    {preview ? <p className="tbf-classified__body line-clamp-3">{preview}</p> : null}
+                  </button>
+                  <p className="tbf-classified__meta">
+                    {[item.neighborhood, date].filter(Boolean).join(' · ')}
+                  </p>
+                  <div className="tbf-classified__actions">
+                    <button
+                      type="button"
+                      onClick={() => onViewItem(item)}
+                      className="sbn-btn sbn-btn-secondary sbn-btn-sm flex-1"
+                    >
+                      <Eye className="w-3.5 h-3.5" />
+                      View
+                    </button>
+                    <button
+                      type="button"
+                      onClick={onRequireSignIn}
+                      className="sbn-btn sbn-btn-primary sbn-btn-sm flex-1"
+                    >
+                      Sign in
+                    </button>
+                  </div>
+                </div>
+                {cover ? (
+                  <button
+                    type="button"
+                    className="tbf-story__thumb"
+                    onClick={() => onViewItem(item)}
+                    aria-label={`View ${item.title || 'listing'}`}
+                  >
+                    <ListingImage src={cover} alt={item.title} width={240} className="tbf-story__img" />
+                  </button>
+                ) : null}
+              </article>
+            );
+          })}
+        </div>
+      )}
+
+      {!emptyState && !newspaperSkin && (
+        <HorizontalSnapRow label="Live neighborhood listings">
+          {previewItems.map((item) => {
+            const photos = item.imageUrls?.length ? item.imageUrls : extractListingImageUrls(item);
+            const cover = photos[0];
+            const preview = stripListingMetadata(item.description);
+
+            return (
+              <Fragment key={item.id}>
+                <SnapSlide className="w-[min(100%,19rem)] sm:w-[min(85%,20rem)]">
+                <article className="sbn-card overflow-hidden flex flex-col text-left h-full">
+                  <button
+                    type="button"
+                    onClick={() => onViewItem(item)}
+                    aria-label={`View ${item.title || 'listing'}`}
+                    className="relative aspect-[16/10] bg-inset w-full cursor-pointer"
+                  >
+                    {cover ? (
+                      <ListingImage src={cover} alt={item.title} width={640} className="w-full h-full object-cover" />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-subtle text-xs">
+                        No photo
+                      </div>
+                    )}
+                    <span
+                      className={`absolute top-2 left-2 sbn-badge text-[8px] px-1 py-0 leading-none whitespace-nowrap ${getPostTypeBadgeClass(item.type)}`}
+                    >
+                      {getPostTypeGridBadgeLabel(item.type)}
+                    </span>
+                  </button>
+
+                  <div className="p-4 flex flex-col flex-1">
+                    <button type="button" onClick={() => onViewItem(item)} className="text-left cursor-pointer">
+                      <h3 className="font-display font-bold text-app leading-snug line-clamp-2">{item.title}</h3>
+                      {preview && (
+                        <p className="text-sm text-muted mt-1.5 line-clamp-2 leading-relaxed">{preview}</p>
+                      )}
+                    </button>
+
+                    <p className="text-xs text-muted mt-2 flex items-center gap-1">
+                      <MapPin className="w-3.5 h-3.5 text-accent shrink-0" />
+                      {item.neighborhood}
+                    </p>
+
+                    <div className="mt-auto pt-3 flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => onViewItem(item)}
+                        className="sbn-btn sbn-btn-secondary sbn-btn-sm flex-1"
+                      >
+                        <Eye className="w-3.5 h-3.5" />
+                        Preview
+                      </button>
+                      <button
+                        type="button"
+                        onClick={onRequireSignIn}
+                        className="sbn-btn sbn-btn-primary sbn-btn-sm flex-1"
+                      >
+                        Sign in
+                      </button>
+                    </div>
+                  </div>
+                </article>
+              </SnapSlide>
+              </Fragment>
+            );
+          })}
+        </HorizontalSnapRow>
+      )}
+    </section>
+  );
+}

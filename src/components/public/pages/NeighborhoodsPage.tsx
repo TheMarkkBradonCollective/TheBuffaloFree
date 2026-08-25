@@ -1,0 +1,33 @@
+import { MapPin } from 'lucide-react';
+import { BUFFALO_NEIGHBORHOODS } from '../../../types';
+import PublicCard from '../PublicCard';
+import PublicPageShell from '../PublicPageShell';
+import { useNewspaperSkin } from '../../../preview/NewspaperSkinContext';
+
+export default function NeighborhoodsPage() {
+  const { enabled: newspaper } = useNewspaperSkin();
+  return (
+    <PublicPageShell
+      title={newspaper ? 'The city desk' : 'Buffalo neighborhoods'}
+      subtitle={
+        newspaper
+          ? 'Correspondents from across the city and surrounding areas are welcome.'
+          : 'Neighbors from across the city and surrounding areas are welcome.'
+      }
+    >
+      <PublicCard>
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+          {BUFFALO_NEIGHBORHOODS.map((area) => (
+            <div
+              key={area}
+              className="px-3 py-2.5 rounded-xl bg-inset border border-app text-xs font-bold text-app flex items-center gap-1.5"
+            >
+              <MapPin className="w-3 h-3 text-accent shrink-0" />
+              {area}
+            </div>
+          ))}
+        </div>
+      </PublicCard>
+    </PublicPageShell>
+  );
+}

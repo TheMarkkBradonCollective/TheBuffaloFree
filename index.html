@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
+    <title>TheBuffaloFree — Give freely. Ask kindly.</title>
+    <meta name="description" content="TheBuffaloFree — give away items and request what you need. No selling, no bidding, no flipping. Neighbors helping neighbors." />
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="icon" type="image/png" href="/app-icon.png" />
+    <link rel="apple-touch-icon" href="/app-icon.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="TheBuffaloFree" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="theme-color" content="#0b0b0c" />
+    <link rel="dns-prefetch" href="https://api.dicebear.com" />
+    <script>
+      (function () {
+        var k = 'tbf_theme';
+        var t = localStorage.getItem(k);
+        if (t !== 'light' && t !== 'dark') {
+          t = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+        }
+        document.documentElement.classList.add(t);
+        document.documentElement.style.colorScheme = t;
+        var meta = document.querySelector('meta[name="theme-color"]');
+        if (meta) meta.setAttribute('content', t === 'light' ? '#ffffff' : '#0b0b0c');
+        if (localStorage.getItem('tbf_profile_cache_v1')) {
+          document.documentElement.classList.add('sbn-session-restore');
+        }
+        var native = window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform();
+        if (native) {
+          document.documentElement.classList.add('capacitor-native');
+          if (window.Capacitor.getPlatform() === 'android') {
+            document.documentElement.classList.add('capacitor-android');
+          }
+          if (meta) meta.setAttribute('content', '#000000');
+        }
+        var params = new URLSearchParams(location.search);
+        var hashQ = location.hash.indexOf('?') >= 0
+          ? new URLSearchParams(location.hash.slice(location.hash.indexOf('?') + 1))
+          : null;
+        var skin = params.get('skin') || (hashQ && hashQ.get('skin'));
+        var stored = sessionStorage.getItem('tbf_newspaper_look_v2');
+        var newspaper = stored === '1';
+        if (skin === 'newspaper') newspaper = true;
+        if (skin === 'original') newspaper = false;
+        if (newspaper) {
+          document.documentElement.classList.add('newspaper-preview');
+          document.title = 'TheBuffaloFree — All the news that’s fit to give';
+          if (meta && !native) meta.setAttribute('content', t === 'light' ? '#e6e5e0' : '#0c0c0b');
+        } else {
+          document.title = 'TheBuffaloFree — Give freely. Ask kindly.';
+        }
+        if (native && meta) meta.setAttribute('content', '#000000');
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

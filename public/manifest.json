@@ -1,0 +1,27 @@
+{
+  "id": "/",
+  "name": "TheBuffaloFree",
+  "short_name": "TheBuffaloFree",
+  "description": "A community-powered platform where Buffalo neighbors give away items and request what they need — completely free. No selling. No bidding. No flipping.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0b0b0c",
+  "theme_color": "#0b0b0c",
+  "orientation": "portrait-primary",
+  "categories": ["social", "lifestyle", "shopping"],
+  "icons": [
+    {
+      "src": "/app-icon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/app-icon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
