@@ -5,7 +5,7 @@ export async function clearAppAssetCaches(): Promise<void> {
     const keys = await caches.keys();
     await Promise.all(
       keys
-        .filter((key) => key.startsWith('sac-buy-nothing'))
+        .filter((key) => key.startsWith('buf-buy-nothing') || key.startsWith('sac-buy-nothing'))
         .map((key) => caches.delete(key)),
     );
   } catch {
