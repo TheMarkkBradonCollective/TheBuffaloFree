@@ -3,7 +3,7 @@
  *
  * app-icon.png is the Buffalo blue squircle (download (6).png). Adaptive
  * launcher foregrounds keep transparency; legacy mipmaps are composited on the
- * same green so home-screen icons match the website/PWA.
+ * same Buffalo blue so home-screen icons match the website/PWA.
  *
  * Android status-bar glyphs come from public/notification-icon.png (3D hands
  * artwork). That file is read-only here — only drawable density folders get

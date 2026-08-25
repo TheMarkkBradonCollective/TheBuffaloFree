@@ -7,8 +7,6 @@ import { useEventsRealtime } from './hooks/useEventsRealtime';
 import { useAuthorProfilesRealtime } from './hooks/useAuthorProfilesRealtime';
 import { useBlockedUsers } from './hooks/useBlockedUsers';
 import { UserProfile, ItemPost, PendingChatCompose, CommunityEvent, FeedPost } from './types';
-import NewspaperPreviewBanner from './components/public/newspaper/NewspaperPreviewBanner';
-import NewspaperEditionBar from './components/public/newspaper/NewspaperEditionBar';
 import PublicSite from './components/public/PublicSite';
 import Onboarding from './components/Onboarding';
 import PostItemModal from './components/PostItemModal';
@@ -51,7 +49,6 @@ import { confirmStaffEventOutreach, confirmStaffListingOutreach } from './lib/st
 import { isStaffActingOfficial } from './lib/staffInteractionMode';
 import { APP_ICON_SRC, SITE, SUPPORT, AWARDS, PRIVACY, TERMS } from './siteContent';
 import { NEWSPAPER } from './preview/newspaperBrand';
-import { isNewspaperSkinActive } from './preview/NewspaperSkinContext';
 import GoGetRingCoordinator from './components/goget/GoGetRingCoordinator';
 import GoGetTripCoordinator from './components/goget/GoGetTripCoordinator';
 import FullScreenPanel from './components/FullScreenPanel';
@@ -2207,8 +2204,6 @@ export default function App() {
 
   return (
     <div id="app_root_layout" className="min-h-screen flex flex-col mesh-bg text-app antialiased font-sans">
-      {sessionUser ? <NewspaperPreviewBanner /> : null}
-      {sessionUser ? <NewspaperEditionBar /> : null}
       {showDownloadPage && sessionUser ? (
         <DownloadPage
           userProfile={userProfile}
@@ -2842,13 +2837,11 @@ export default function App() {
         >
           <div className="flex items-start justify-between gap-3">
             <div className="flex items-start space-x-3">
-              {!isNewspaperSkinActive() ? (
-                <img
+              <img
                   src={APP_ICON_SRC}
                   alt=""
                   className="w-10 h-10 rounded-lg object-contain shrink-0 mt-0.5 bg-surface border border-app"
                 />
-              ) : null}
               <div className="min-w-0">
                 <h4 className="text-[10px] font-black uppercase tracking-widest text-accent">Download Mobile App</h4>
                 <p className="text-xs font-bold text-app mt-1">

@@ -18,10 +18,7 @@
       "purpose": "any"
     },
     {
-      "src": "/app-icon.png",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "maskable"
+      "src": "/app-icon-maskable.png",
     }
   ]
 }

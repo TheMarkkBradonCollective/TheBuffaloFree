@@ -184,7 +184,7 @@ async function main() {
   const origin = new URL(ORIGIN).origin;
   const context = page.browserContext();
   await context.overridePermissions(origin, ['geolocation']);
-  await page.setGeolocation({ latitude: 38.5816, longitude: -121.4944 });
+  await page.setGeolocation({ latitude: 42.8864, longitude: -78.8784 });
   await page.emulateMediaFeatures([
     { name: 'prefers-color-scheme', value: 'light' },
     { name: 'prefers-reduced-motion', value: 'reduce' },
@@ -194,9 +194,9 @@ async function main() {
   );
   await page.evaluateOnNewDocument(() => {
     try {
-      localStorage.setItem('sbn_theme', 'light');
+      localStorage.setItem('tbf_theme', 'light');
       localStorage.setItem(
-        'sbn_newspaper_experience_v1',
+        'tbf_newspaper_experience_v1',
         JSON.stringify({
           pageSounds: false,
           typewriterSounds: false,
@@ -205,8 +205,9 @@ async function main() {
           reducedMotion: true,
         }),
       );
-      document.documentElement.classList.add('light', 'newspaper-preview');
-      document.documentElement.classList.remove('dark');
+      sessionStorage.setItem('tbf_newspaper_look_v2', '0');
+      document.documentElement.classList.add('light');
+      document.documentElement.classList.remove('dark', 'newspaper-preview');
     } catch {
       /* ignore */
     }
