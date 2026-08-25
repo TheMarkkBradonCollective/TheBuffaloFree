@@ -54,7 +54,7 @@ export function packPlayStoreScreenshotsZip() {
     'Phone screenshots (1080×1920) — upload in this order:',
     ...PLAY_STORE_PHONE_SCREENSHOTS.map(([file, label], i) => `  ${i + 1}. ${file} — ${label}`),
     '',
-    'Go Get screenshots (09–16) use fictional Buffalo landmarks (Capitol, Midtown, East Sac, etc.).',
+    'Go Get screenshots (09–16) use fictional Buffalo landmarks (City Hall, Elmwood Village, Canalside, etc.).',
     '',
     'Individual files are also at /downloads/play-store/ on the live site.',
     '',

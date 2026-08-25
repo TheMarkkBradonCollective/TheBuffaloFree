@@ -148,7 +148,7 @@ export default function Onboarding({ user, onComplete }: OnboardingProps) {
               rows={3}
               value={bio}
               onChange={(e) => setBio(e.target.value)}
-              placeholder="e.g., 'Just moved to Curtis Park. Excited to meet neighbors, reduce waste, and find warm homes for extra garden tomatoes!'"
+              placeholder="e.g., 'Just moved to Allentown. Excited to meet neighbors, reduce waste, and find warm homes for extra winter gear!'"
               maxLength={500}
               className="block w-full p-3 bg-inset border border-app rounded-xl text-sm text-app placeholder:text-subtle font-medium resize-none focus:outline-hidden focus:border-accent"
             />

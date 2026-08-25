@@ -34,11 +34,11 @@ function avatar(seed: string): string {
 
 export const DEMO_GOGET_AVERY_PROFILE: UserProfile = {
   uid: 'demo-neighbor-avery',
-  displayName: 'Avery Quinn',
-  email: 'avery.quinn.demo@example.com',
-  neighborhood: 'Elmwood Village',
-  bio: 'Elmwood neighbor — porch pickups welcome.',
-  photoURL: avatar('Avery Quinn'),
+  displayName: 'Nia Brooks',
+  email: 'nia.brooks.demo@example.com',
+  neighborhood: 'Allentown',
+  bio: 'Allentown neighbor — porch pickups welcome.',
+  photoURL: avatar('Nia Brooks'),
   role: 'user',
   accountStatus: 'active',
   goGetEnabled: true,
@@ -48,10 +48,10 @@ export const DEMO_GOGET_AVERY_PROFILE: UserProfile = {
 
 export const DEMO_GOGET_JORDAN_PROFILE: UserProfile = {
   uid: 'demo-neighbor-jordan',
-  displayName: 'Jordan Hale',
-  email: 'jordan.hale.demo@example.com',
-  neighborhood: 'Allentown',
-  photoURL: avatar('Jordan Hale'),
+  displayName: 'Theo Walsh',
+  email: 'theo.walsh.demo@example.com',
+  neighborhood: 'Hertel / North Buffalo',
+  photoURL: avatar('Theo Walsh'),
   role: 'user',
   accountStatus: 'active',
   goGetEnabled: true,
@@ -61,10 +61,10 @@ export const DEMO_GOGET_JORDAN_PROFILE: UserProfile = {
 
 export const DEMO_GOGET_RILEY_PROFILE: UserProfile = {
   uid: 'demo-neighbor-riley',
-  displayName: 'Riley Nguyen',
-  email: 'riley.nguyen.demo@example.com',
+  displayName: 'Devon Ruiz',
+  email: 'devon.ruiz.demo@example.com',
   neighborhood: 'Delaware District',
-  photoURL: avatar('Riley Nguyen'),
+  photoURL: avatar('Devon Ruiz'),
   role: 'user',
   accountStatus: 'active',
   goGetEnabled: true,
@@ -99,9 +99,9 @@ function baseChairSession(overrides: Partial<GoGetSession>): GoGetSession {
     chatId: 'demo-chat-chair',
     handshakeMode: 'availability',
     status: 'awaiting_availability',
-    destinationLat: BUFFALO_LOCATIONS.elmwood.lat,
-    destinationLng: BUFFALO_LOCATIONS.elmwood.lng,
-    destinationLabel: `${BUFFALO_LOCATIONS.elmwood.label} porch`,
+    destinationLat: BUFFALO_LOCATIONS.allentown.lat,
+    destinationLng: BUFFALO_LOCATIONS.allentown.lng,
+    destinationLabel: `${BUFFALO_LOCATIONS.allentown.label} porch`,
     ringExpiresAt: minutesFromNow(2),
     ringDurationSeconds: 140,
     fulfillerSharingLocation: false,
@@ -147,8 +147,8 @@ export const DEMO_GOGET_LIVE_LOCATION: GoGetLiveLocation = {
 
 export const DEMO_GOGET_FULFILLER_LIVE_LOCATION: GoGetFulfillerLiveLocation = {
   sessionId: DEMO_GOGET_SESSION_ID,
-  lat: BUFFALO_LOCATIONS.elmwood.lat + 0.0008,
-  lng: BUFFALO_LOCATIONS.elmwood.lng + 0.0012,
+  lat: BUFFALO_LOCATIONS.allentown.lat + 0.0008,
+  lng: BUFFALO_LOCATIONS.allentown.lng + 0.0012,
   heading: 210,
   updatedAt: new Date().toISOString(),
 };

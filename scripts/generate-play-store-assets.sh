@@ -20,7 +20,7 @@ if ! command -v ffmpeg >/dev/null 2>&1; then
   exit 1
 fi
 
-# Google Play: 512×512 store icon — same green rounded-square as the app and website.
+# Google Play: 512×512 store icon — same Buffalo blue rounded-square as the app and website.
 node "$ROOT_DIR/scripts/generate-play-store-icon.mjs" "$APP_ICON" "$OUT_DIR/icon-512.png"
 
 # Google Play: 1024×500 feature graphic (logo + name + tagline).

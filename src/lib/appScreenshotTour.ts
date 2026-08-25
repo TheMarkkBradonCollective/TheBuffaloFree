@@ -97,6 +97,6 @@ export const GOGET_TOUR_STEPS: AppTourShot[] = [
   {
     file: '16-goget-arrived.png',
     title: '8. Confirm the handoff',
-    body: 'When you arrive, they confirm the chair (or whatever it is) actually changed hands — or tap “Something’s wrong.” The trip stays locked until that happens. Then you are both free again.',
+    body: 'When you arrive, they confirm the boots (or whatever it is) actually changed hands — or tap “Something’s wrong.” The trip stays locked until that happens. Then you are both free again.',
   },
 ];
